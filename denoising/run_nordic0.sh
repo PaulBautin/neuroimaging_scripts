@@ -41,37 +41,31 @@
 
 ################################################################################
 # dMRI dataset
-subject_bids=''
-bids_dwis=($(ls "${subject_bids}/dwi/${subject}${ses}"*_dir-AP_*dwi.nii* 2>/dev/null))
-bids_phase_dwis=($(ls "${subject_bids}/dwi/${subject}${ses}"*_dir-AP_*part-phase_dwi.nii* 2>/dev/null))
+# Input and output file paths
+img_magn_in='/local_raid/data/pbautin/data/sub-Pilot014/ses-01/dwi/sub-Pilot014_ses-01_acq_multib_70d_dir-AP_dwi.nii.gz'
+img_phase_in='/local_raid/data/pbautin/data/sub-Pilot014/ses-01/dwi/sub-Pilot014_ses-01_acq_multib_70d_dir-AP_part-phase_dwi.nii.gz'
+img_out='sub-Pilot014_ses-01_acq_multib_70d_dir-AP_nordic_' # Do not put extension .nii
+nordic_matlab_dir='/local_raid/data/pbautin/NORDIC_Raw/'  # Directory containing NIFTI_NORDIC.m
+
+# Arguments for the MATLAB function
+ARG_temporal_phase=3
+ARG_phase_filter_width=3
+ARG_DIROUT='/local_raid/data/pbautin/results/NORDIC_denoising/'
+
+# Run MATLAB command with the specified arguments
+matlab -nodisplay -nojvm -nosplash -nodesktop -r " \
+try; \
+addpath('${nordic_matlab_dir}'); \
+ARG.temporal_phase = ${ARG_temporal_phase}; \
+ARG.phase_filter_width = ${ARG_phase_filter_width}; \
+ARG.DIROUT = '${ARG_DIROUT}'; \
+NIFTI_NORDIC('${img_magn_in}', '${img_phase_in}', '${img_out}', ARG); \
+end; \
+quit;" \
+>> ${ARG_DIROUT}/log_NORDIC_$(date '+%Y-%m-%d').txt
 
 
-
-# # Input and output file paths
-# img_magn_in='/local_raid/data/pbautin/data/sub-Pilot014/ses-01/dwi/sub-Pilot014_ses-01_acq_multib_70d_dir-AP_dwi.nii.gz'
-# img_phase_in='/local_raid/data/pbautin/data/sub-Pilot014/ses-01/dwi/sub-Pilot014_ses-01_acq_multib_70d_dir-AP_part-phase_dwi.nii.gz'
-# img_out='sub-Pilot014_ses-01_acq_multib_70d_dir-AP_nordic_' # Do not put extension .nii
-# nordic_matlab_dir='/local_raid/data/pbautin/NORDIC_Raw/'  # Directory containing NIFTI_NORDIC.m
-#
-# # Arguments for the MATLAB function
-# ARG_temporal_phase=3
-# ARG_phase_filter_width=3
-# ARG_DIROUT='/local_raid/data/pbautin/results/NORDIC_denoising/'
-#
-# # Run MATLAB command with the specified arguments
-# matlab -nodisplay -nojvm -nosplash -nodesktop -r " \
-# try; \
-# addpath('${nordic_matlab_dir}'); \
-# ARG.temporal_phase = ${ARG_temporal_phase}; \
-# ARG.phase_filter_width = ${ARG_phase_filter_width}; \
-# ARG.DIROUT = '${ARG_DIROUT}'; \
-# NIFTI_NORDIC('${img_magn_in}', '${img_phase_in}', '${img_out}', ARG); \
-# end; \
-# quit;" \
-# >> ${ARG_DIROUT}/log_NORDIC_$(date '+%Y-%m-%d').txt
-#
-#
-# dwidenoise ${img_magn_in} ${ARG_DIROUT}/sub-01_ses-2mm_dir-AP_run-01_part-mag_dwi_mppca.nii.gz
+dwidenoise ${img_magn_in} ${ARG_DIROUT}/sub-01_ses-2mm_dir-AP_run-01_part-mag_dwi_mppca.nii.gz
 
 
 

@@ -24,7 +24,7 @@
 # ------------------------------------------------------------------------------
 
 
-export MICAPIPE=/local_raid/data/pbautin/software/micapipe_dev024
+export MICAPIPE=/local_raid/data/pbautin/software/micapipe
 PATH=${PATH}:${MICAPIPE}:${MICAPIPE}/functions
 export PATH
 
@@ -93,12 +93,13 @@ unset PYTHONHOME
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 conda3_bin=/data/mica1/01_programs/micapipe-v0.2.0_conda/conda3/bin/
-conda3_bin=/local_raid/data/pbautin/software/conda/bin/
+#conda3_bin=/local_raid/data/pbautin/software/conda/bin/
 source /data/mica1/01_programs/micapipe-v0.2.0_conda/conda3/etc/profile.d/conda.sh
+
 
 #------------------------------------------------------------------------------#
 # Set the libraries paths for mrtrx and fsl
-export LD_LIBRARY_PATH="${FSLDIR}/lib:${FSL_BIN}:${mrtrixDir}/lib"
+export LD_LIBRARY_PATH="${FSLDIR}/lib:${FSL_BIN}:${mrtrixDir}/lib:$CONDA_PREFIX/lib:$LD_LIBRARY_PATH"
 
 #-----------------------------------------------------------------------------------#
 # Export new PATH with al the necessary binaries
@@ -117,59 +118,49 @@ export SINGULARITY_CACHEDIR=/local_raid/data/pbautin/container/singularity_cache
 
 
 
-bids='/local_raid/data/pbautin/data/3t_data'
-out='/local_raid/data/pbautin/data/3t_data'
+bids='/local_raid/data/pbautin/data/pilot_dataset'
+out='/local_raid/data/pbautin/results/micapipe'
 fs_lic='/data_/mica1/01_programs/freesurfer-7.3.2/license.txt'
 tmp='/local_raid/data/pbautin/results/micapipe/tmp'
-sub='HC007'
-ses='01'
+sub='Pilot014'
+ses='02'
 micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 
-#dwi_4proc=/local_raid/data/pbautin/results/micapipe/tmp/5913_micapipe_proc-dwi_Pilot014/dwi_dns_even.mif
-#dwi_dns=/local_raid/data/pbautin/results/micapipe/tmp/5913_micapipe_proc-dwi_Pilot014/sub-Pilot014_ses-02_space-dwi_desc-denoised_dwi.mif
-#mrconvert "$dwi_dns" "$dwi_4proc" -coord 3 0:end -force
-#dwifslpreproc /local_raid/data/pbautin/results/micapipe/tmp/5913_micapipe_proc-dwi_Pilot014/dwi_dns_even.mif /local_raid/data/pbautin/results/micapipe/micapipe_v0.2.0/sub-Pilot014/ses-02/dwi/sub-Pilot014_ses-02_space-dwi_desc-preproc_dwi.mif -#rpe_pair -align_seepi -se_epi /local_raid/data/pbautin/results/micapipe/tmp/5913_micapipe_proc-dwi_Pilot014/b0_pair.mif -pe_dir j- -readout_time 0.0357 -eddy_options " --data_is_shelled --slm=linear --repol --nvoxhp 2000 --mporder=#" -nthreads 30 -#nocleanup -scratch /local_raid/data/pbautin/results/micapipe/tmp/5913_micapipe_proc-dwi_Pilot014 -force
+
+#singularity run --writable-tmpfs --containall \
+#    -B ${bids}:/bids \
+#    -B ${out}:/out \
+#    -B ${tmp}:/tmp \
+#    -B ${fs_lic}:/opt/licence.txt \
+#    ${micapipe_img} \
+#    -bids /bids \
+#    -out /out \
+#    -fs_licence /opt/licence.txt \
+#    -proc_surf \
+#    -sub $sub \
+#    -ses $ses \
 
 
-# singularity run --writable-tmpfs --containall \
-#     -B ${bids}:/bids \
-#     -B ${out}:/out \
-#     -B ${tmp}:/tmp \
-#     -B ${fs_lic}:/opt/licence.txt \
-#     ${micapipe_img} \
-#     -bids /bids \
-#     -out /out \
-#     -fs_licence /opt/licence.txt \
-#     -sub $sub \
-#     -ses $ses \
-#     -proc_surf
-
-# #structural processing
+#structural processing
 # micapipe \
 #     -bids $bids \
 #     -out $out \
 #     -fs_licence $fs_lic \
 #     -sub $sub \
 #     -ses $ses \
-#     -post_structural \
-#     -b0thr '61' \
-#     -uni -T1wStr acq-uni_0p7-T1map,acq-inv1_0p7-T1map,acq-inv2_0p7-T1map
+#     -proc_structural \
+#     -uni -T1wStr acq-uni_0p5-T1map,acq-inv1_0p5-T1map,acq-inv2_0p5-T1map
 
-# # DWI processing
-# micapipe \
-#      -bids $bids \
-#      -out $out \
-#      -fs_licence $fs_lic \
-#      -sub $sub \
-#      -ses $ses \
-#      -b0thr '61' \
-#      -proc_dwi \
-#      -dwi_main ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_dwi.nii.gz \
-#      -dwi_rpe ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq-b0_dir-PA_run-1_epi.nii.gz \
-#      -tmpDir $tmp -threads 30 \
-#      -dwi_phase FALSE #${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_part-phase_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_part-phase_dwi.nii.gz
-#
-#
+#structural processing
+#micapipe \
+#    -bids $bids \
+#    -out $out \
+#    -fs_licence $fs_lic \
+#    -sub $sub \
+#    -ses $ses \
+#    -post_structural \
+#    -uni -T1wStr acq-uni_0p5-T1map,acq-inv1_0p5-T1map,acq-inv2_0p5-T1map
+
 # DWI processing
 micapipe \
     -bids $bids \
@@ -177,7 +168,22 @@ micapipe \
     -fs_licence $fs_lic \
     -sub $sub \
     -ses $ses \
-    -SC -nocleanup -tracts 5M
+    -b0thr '61' \
+    -proc_dwi \
+    -dwi_main ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_1p5iso_run-1_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_1p5iso_run-1_dwi.nii.gz \
+    -dwi_rpe ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq-b0_dir-PA_1p5iso_run-1_epi.nii.gz \
+    -tmpDir $tmp -threads 30 \
+    -dwi_phase ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_1p5iso_run-2_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_1p5iso_run-2_dwi.nii.gz
+#
+#
+# # DWI processing
+ # micapipe \
+ #     -bids $bids \
+ #     -out $out \
+ #     -fs_licence $fs_lic \
+ #     -sub $sub \
+ #     -ses $ses \
+ #     -SC -nocleanup -tracts 5M
 
 
 # DWI processing
