@@ -49,6 +49,7 @@ metadata=( \
     "/local_raid/data/pbautin/data/pilot_dataset/sub-Pilot014/ses-01/func/sub-Pilot014_ses-01_task-rest_run-2_echo-3_bold.json" \
 )
 
+<<<<<<< HEAD
 warpkit_img='/local_raid/data/pbautin/container/warpkit.simg'
 out_prefix='/local_raid/data/pbautin/results/medic/medic_'
 
@@ -117,3 +118,14 @@ done
 
 # Concatenate all the warped frames into a 4D NIfTI image
 fslmerge -t ${out_prefix}warped_img_4D.nii.gz ${out_prefix}_warped_{0..5}.nii.gz
+=======
+out_prefix='/home/pabaua/dev_mni/results/medic_sdc/medic_'
+
+singularity run --writable-tmpfs --containall  \
+    -B /home/pabaua/dev_mni/data/me_fmri_data/:/home/pabaua/dev_mni/data/me_fmri_data/ \
+    /home/pabaua/dev_mni/software/warpkit.simg \
+    --magnitude ${magnitude_data[0]} ${magnitude_data[1]} ${magnitude_data[2]} \
+    --phase ${phase_data[0]} ${phase_data[1]} ${phase_data[2]} \
+    --metadata ${metadata[0]} ${metadata[1]} ${metadata[2]} \
+    --out_prefix $out_prefix
+>>>>>>> 5fa897b8fcfbb5a36552f622aba14b1277bd80ec
