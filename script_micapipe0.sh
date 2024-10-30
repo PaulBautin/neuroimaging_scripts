@@ -162,18 +162,18 @@ micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 #    -uni -T1wStr acq-uni_0p5-T1map,acq-inv1_0p5-T1map,acq-inv2_0p5-T1map
 
 # DWI processing
-micapipe \
-    -bids $bids \
-    -out $out \
-    -fs_licence $fs_lic \
-    -sub $sub \
-    -ses $ses \
-    -b0thr '61' \
-    -proc_dwi \
-    -dwi_main ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_1p5iso_run-1_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_1p5iso_run-1_dwi.nii.gz \
-    -dwi_rpe ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq-b0_dir-PA_1p5iso_run-1_epi.nii.gz \
-    -tmpDir $tmp -threads 30 \
-    -dwi_phase ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_1p5iso_run-2_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_1p5iso_run-2_dwi.nii.gz
+# micapipe \
+#     -bids $bids \
+#     -out $out \
+#     -fs_licence $fs_lic \
+#     -sub $sub \
+#     -ses $ses \
+#     -b0thr '61' \
+#     -proc_dwi \
+#     -dwi_main ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_1p5iso_run-1_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_1p5iso_run-1_dwi.nii.gz \
+#     -dwi_rpe ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq-b0_dir-PA_1p5iso_run-1_epi.nii.gz \
+#     -tmpDir $tmp -threads 30 \
+#     -dwi_phase ${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_38d_dir-AP_1p5iso_run-2_dwi.nii.gz,${bids}/sub-${sub}/ses-${ses}/dwi/sub-${sub}_ses-${ses}_acq_multib_70d_dir-AP_1p5iso_run-2_dwi.nii.gz
 #
 #
 # # DWI processing
@@ -200,3 +200,15 @@ micapipe \
 #    -func_rpe ${bids}/sub-${sub}/ses-${ses}/fmap/sub-${sub}_ses-${ses}_acq-fmri_dir-PA_epi.nii.gz \
 #    -mainScanRun 1 \
 #    -phaseReversalRun 1
+
+# qMRIDWI processing
+micapipe \
+   -bids $bids \
+   -out $out \
+   -fs_licence $fs_lic \
+   -sub $sub \
+   -ses $ses \
+   -MPC -mpc_acq T1map -regSynth \
+ 	 -microstructural_img ${bids}/sub-${sub}/ses-${ses}/anat/sub-${sub}_ses-${ses}_acq-T1_0p5-T1map.nii.gz \
+   -microstructural_reg ${bids}/sub-${sub}/ses-${ses}/anat/sub-${sub}_ses-${ses}_acq-inv1_0p5-T1map.nii.gz \
+   -tmpDir $tmp -threads 30 \
