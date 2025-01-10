@@ -118,38 +118,105 @@ export SINGULARITY_CACHEDIR=/local_raid/data/pbautin/container/singularity_cache
 
 
 
-bids='/local_raid/data/pbautin/data/pilot_dataset'
-out='/local_raid/data/pbautin/results/micapipe'
+dataset='/local_raid/data/pbautin/data/MNI152Volumes'
+output_folder='/local_raid/data/pbautin/data/MNI152Volumes/micapipe'
 fs_lic='/data_/mica1/01_programs/freesurfer-7.3.2/license.txt'
-tmp='/local_raid/data/pbautin/results/micapipe/tmp'
-sub='Pilot014'
-ses='02'
+tmpDir='/local_raid/data/pbautin/data/MNI152Volumes/micapipe/tmp'
+subject='mni'
+session='01'
 micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 
 
-#singularity run --writable-tmpfs --containall \
-#    -B ${bids}:/bids \
-#    -B ${out}:/out \
-#    -B ${tmp}:/tmp \
-#    -B ${fs_lic}:/opt/licence.txt \
+mri_synthseg --i /local_raid/data/pbautin/data/sub-AHEAD122017/anat/sub-AHEAD122017_blockface-image.nii.gz \
+--o /local_raid/data/pbautin/data/sub-AHEAD122017/synthseg --robust --threads 30 --parc
+
+
+# micapipe -sub ${subject} \
+#     	  -bids ${dataset} \
+#     	  -out ${output_folder} \
+#         -fs_licence ${fs_licence} \
+#         -sub ${subject} \
+#     	  -ses ${session} \
+#     	  -tmpDir ${tmpDir} \
+#     	  -proc_structural
+
+# micapipe -sub ${subject} \
+#     	  -bids ${dataset} \
+#     	  -out ${output_folder} \
+#         -fs_licence ${fs_licence} \
+#         -sub ${subject} \
+#     	  -ses ${session} \
+#     	  -tmpDir ${tmpDir} \
+#     	  -proc_surf
+
+# singularity run --writable-tmpfs --containall \
+#    -B ${dataset}:/bids \
+#    -B ${output_folder}:/out \
+#    -B ${tmpDir}:/tmp \
+#    -B ${fs_licence}:/opt/licence.txt \
 #    ${micapipe_img} \
 #    -bids /bids \
 #    -out /out \
 #    -fs_licence /opt/licence.txt \
 #    -proc_surf \
-#    -sub $sub \
-#    -ses $ses \
+#    -sub $subject \
+#    -ses $session \
+
+# singularity run --writable-tmpfs --containall \
+#    -B ${dataset}:/bids \
+#    -B ${output_folder}:/out \
+#    -B ${tmpDir}:/tmp \
+#    -B ${fs_licence}:/opt/licence.txt \
+#    ${micapipe_img} \
+#    -bids /bids \
+#    -out /out \
+#    -fs_licence /opt/licence.txt \
+#    -post_structural \
+#    -GD \
+#    -sub $subject \
+#    -ses $session \
 
 
-#structural processing
-# micapipe \
-#     -bids $bids \
-#     -out $out \
-#     -fs_licence $fs_lic \
-#     -sub $sub \
-#     -ses $ses \
-#     -proc_structural \
-#     -uni -T1wStr acq-uni_0p5-T1map,acq-inv1_0p5-T1map,acq-inv2_0p5-T1map
+# Remove the medial wall
+# dwi_cortex='/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/parc/sub-mni_ses-01_space-nativepro_T1w_atlas-schaefer-200_out.nii.gz'
+# dwi_subc='/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/parc/sub-mni_ses-01_space-nativepro_T1w_atlas-subcortical.nii.gz'
+# dwi_cere='/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/parc/sub-mni_ses-01_space-nativepro_T1w_atlas-cerebellum.nii.gz'
+# dwi_cortexSub='/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/parc/sub-mni_ses-01_space-nativepro_T1w_atlas-schaefer-200_sub.nii.gz'
+# dwi_all='/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/parc/sub-mni_ses-01_space-nativepro_T1w_atlas-schaefer-200_all.nii.gz'
+#for i in 1000 2000; do fslmaths "$dwi_cortex" -thr "$i" -uthr "$i" -binv -mul "$dwi_cortex" "$dwi_cortex"; done
+#fslmaths "$dwi_cortex" -binv -mul "$dwi_subc" -add "$dwi_cortex" "$dwi_cortexSub" -odt int # added the subcortical parcellation
+#   fslmaths $dwi_cere -add 100 $dwi_cere
+#fslmaths "$dwi_cortexSub" -binv -mul "$dwi_cere" -add "$dwi_cortexSub" "$dwi_all" -odt int # added the cerebellar parcellation
+
+
+# tck='/local_raid/data/pbautin/data/dTOR_full_tractogram.tck'
+#
+# tck2connectome ${tck} ${dwi_all} "/local_raid/data/pbautin/data/connectome.txt"
+# lut_sc='/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_subcortical-cerebellum_mics.csv'
+# lut='/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-200_mics.csv'
+# python "${MICAPIPE}"/functions/connectome_slicer.py --conn="/local_raid/data/pbautin/data/connectome.txt" --lut1="$lut_sc" --lut2="$lut" --mica="$MICAPIPE"
+
+
+
+# input_t1=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_T1w.nii.gz
+# output_t1_n4=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_T1w_n4.nii.gz
+# output_t1_bias_field=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_bias_field.nii.gz
+
+# input_t1=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_T1w.nii.gz
+# output_t1_n4=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_T1w_n4.nii.gz
+# output_t1_bias_field=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_bias_field.nii.gz
+
+# N4BiasFieldCorrection -d 3 -i ${input_t1} \
+#     -o [${output_t1_n4}, ${output_t1_bias_field}] \
+#     -b [ 180, 3 ] -c [ 50x50x50x50, 0.0 ] -s 4 -v 1
+
+# source activate env_commit
+# output_t1_nlm=${output_folder}/micapipe_v0.2.0/sub-${subject}/ses-${session}/anat/sub-${subject}_ses-${session}_space-nativepro_T1w_nlm.nii.gz
+# python /local_raid/data/pbautin/software/neuroimaging_scripts/denoising/mica_nlm.py \
+#     ${output_t1_n4} \
+#     ${output_t1_nlm} \
+#     32
+
 
 #structural processing
 #micapipe \
@@ -160,6 +227,15 @@ micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 #    -ses $ses \
 #    -post_structural \
 #    -uni -T1wStr acq-uni_0p5-T1map,acq-inv1_0p5-T1map,acq-inv2_0p5-T1map
+
+# micapipe -sub ${subject} \
+#     	  -bids ${dataset} \
+#     	  -out ${output_folder} \
+#         -fs_licence ${fs_licence} \
+#         -sub ${subject} \
+#     	  -ses ${session} \
+#     	  -tmpDir ${tmpDir} \
+#     	  -proc_surf
 
 # DWI processing
 # micapipe \
@@ -201,14 +277,14 @@ micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 #    -mainScanRun 1 \
 #    -phaseReversalRun 1
 
-# qMRIDWI processing
-micapipe \
-   -bids $bids \
-   -out $out \
-   -fs_licence $fs_lic \
-   -sub $sub \
-   -ses $ses \
-   -MPC -mpc_acq T1map -regSynth \
- 	 -microstructural_img ${bids}/sub-${sub}/ses-${ses}/anat/sub-${sub}_ses-${ses}_acq-T1_0p5-T1map.nii.gz \
-   -microstructural_reg ${bids}/sub-${sub}/ses-${ses}/anat/sub-${sub}_ses-${ses}_acq-inv1_0p5-T1map.nii.gz \
-   -tmpDir $tmp -threads 30 \
+# # qMRIDWI processing
+# micapipe \
+#    -bids $bids \
+#    -out $out \
+#    -fs_licence $fs_lic \
+#    -sub $sub \
+#    -ses $ses \
+#    -MPC -mpc_acq T1map -regSynth \
+#  	 -microstructural_img ${bids}/sub-${sub}/ses-${ses}/anat/sub-${sub}_ses-${ses}_acq-T1_0p5-T1map.nii.gz \
+#    -microstructural_reg ${bids}/sub-${sub}/ses-${ses}/anat/sub-${sub}_ses-${ses}_acq-inv1_0p5-T1map.nii.gz \
+#    -tmpDir $tmp -threads 30 \
