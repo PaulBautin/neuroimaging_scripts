@@ -39,7 +39,7 @@ from scipy.sparse.csgraph import dijkstra
 from brainspace.null_models import SpinPermutations
 from matplotlib import pyplot as plt
 from scipy.stats import spearmanr
-import seaborn as sns
+import seaborn as snsct
 
 from nctpy.energies import get_control_inputs, integrate_u, minimum_energy_fast
 from nctpy.metrics import ave_control

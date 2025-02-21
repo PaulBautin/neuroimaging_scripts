@@ -117,11 +117,11 @@ export SINGULARITY_CACHEDIR=/local_raid/data/pbautin/container/singularity_cache
 
 
 
-bids='/local_raid/data/pbautin/data/3t_data'
-out='/local_raid/data/pbautin/data/3t_data'
+bids='/local_raid/data/pbautin/data/ahead'
+out='/local_raid/data/pbautin/data/ahead/micapipe'
 fs_lic='/data_/mica1/01_programs/freesurfer-7.3.2/license.txt'
-tmp='/local_raid/data/pbautin/results/micapipe/tmp'
-sub='HC007'
+tmp='/local_raid/data/pbautin/data/ahead/micapipe/tmp'
+sub='AHEAD122017'
 ses='01'
 micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 
@@ -155,6 +155,15 @@ micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 #     -b0thr '61' \
 #     -uni -T1wStr acq-uni_0p7-T1map,acq-inv1_0p7-T1map,acq-inv2_0p7-T1map
 
+#structural processing
+micapipe \
+    -bids $bids \
+    -out $out \
+    -fs_licence $fs_lic \
+    -sub $sub \
+    -ses $ses \
+    -post_structural 
+
 # # DWI processing
 # micapipe \
 #      -bids $bids \
@@ -171,13 +180,13 @@ micapipe_img='/data_/mica1/01_programs/micapipe-v0.2.0/micapipe_v0.2.3.sif'
 #
 #
 # DWI processing
-micapipe \
-    -bids $bids \
-    -out $out \
-    -fs_licence $fs_lic \
-    -sub $sub \
-    -ses $ses \
-    -SC -nocleanup -tracts 5M
+# micapipe \
+#     -bids $bids \
+#     -out $out \
+#     -fs_licence $fs_lic \
+#     -sub $sub \
+#     -ses $ses \
+#     -SC -nocleanup -tracts 5M
 
 
 # DWI processing

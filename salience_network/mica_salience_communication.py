@@ -172,50 +172,108 @@ def convert_states_str2int(states_str):
     return states.astype(float), state_labels
 
 
-def barplot_types(dict_state_composition, yeo7_colors):
-        # Extract the keys
-        keys = list(dict_state_composition.keys())
-        num_keys = len(keys)
+def ridge_plot(data_dict):
+    # 1. Filter out invalid keys (e.g., NaN) or empty arrays
+    filtered_dict = {
+        k: v for k, v in data_dict.items()
+        if not pd.isna(k) and len(v) > 0}
 
-        # Create a figure with multiple subplots (e.g., 2 rows x 4 columns)
-        fig, axes = plt.subplots(2, 4, figsize=(16, 8), sharey=True)
-        axes = axes.flatten()
+    # 2. Manually build a long-form DataFrame
+    #    Each row will have two columns: 'category' and 'value'
+    long_dataframes = []
+    for key, array_vals in filtered_dict.items():
+        # Create a temporary DataFrame for this key
+        temp_df = pd.DataFrame({
+            'category': [key] * len(array_vals),
+            'value': array_vals
+        })
+        long_dataframes.append(temp_df)
 
-        # Create a colormap and normalize for keys
-        cmap = yeo7_colors
-        norm = plt.Normalize(vmin=0, vmax=num_keys-1)
+    long_df = pd.concat(long_dataframes, axis=0, ignore_index=True)
 
-        # Plot each key in a subplot
-        for i, (key, vals) in enumerate(dict_state_composition.items()):
-            ax = axes[i]
+    fig, ax = plt.subplots(figsize=(8, 5))
 
-            # Convert dict keys/values to lists
-            x = list(vals.keys())
-            y = list(vals.values())
+    # Gather sorted categories and assign colors
+    unique_cats = sorted(long_df['category'].unique())
+    colors = sns.color_palette('CustomCmap_type', n_colors=len(unique_cats))
 
-            # Assign a color for this key based on its index
-            # (All bars the same color per subplot)
-            color = cmap(norm(i))
+    # ------------------------------------------------------------------------------
+    # 4. Compute and plot each category's KDE on the same axis (no offset).
+    # ------------------------------------------------------------------------------
+    for i, cat in enumerate(unique_cats):
+        subset = long_df.loc[long_df['category'] == cat, 'value'].dropna()
+        if len(subset) == 0:
+            continue
 
-            ax.bar(x, y, color=color)
-            ax.set_title(key)
-            #ax.set_xlabel("Index")
-            if i % 4 == 0:
-                ax.set_ylabel("Percentage (%)")
-            ax.set_xticks(x)
-            ax.set_xticklabels(x, rotation=90)
+        # Compute the kernel density estimate (KDE)
+        kde = stats.gaussian_kde(subset)
+        x_vals = np.linspace(subset.min(), subset.max(), 200)
+        y_vals = kde(x_vals)
 
-        # Create a colorbar that shows the mapping of subplots to colors
-        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
+        # Overlay the distribution on the same axis
+        # Use fill_between with alpha to visualize overlapping areas
+        ax.fill_between(
+            x_vals,
+            y_vals,
+            color=colors[i],
+            alpha=0.7,
+            label=f"{cat}"
+        )
 
-        #cbar = fig.colorbar(cmap, ax=axes, orientation='vertical', fraction=0.02, pad=0.01)
-        #cbar.set_ticks(np.arange(num_keys))
-        #cbar.set_ticklabels(keys)
+    # ------------------------------------------------------------------------------
+    # 5. Tidy up the plot.
+    # ------------------------------------------------------------------------------
+    ax.set_xlabel("Value")
+    ax.set_ylabel("Density")
+    ax.legend(title="Category")
+    plt.tight_layout()
+    plt.show()
 
-        plt.tight_layout()
-        plt.show()
 
+def violin_plot(data_dict):
+    # ---------------------------------------------------------------------
+    # 1. Flatten the nested dictionary into a long-form DataFrame.
+    # ---------------------------------------------------------------------
+    # records = []
+    # for outer_key, sub_dict in data_dict.items():
+    #     for network_key, arr in sub_dict.items():
+    #         # Convert to array in case it's not already
+    #         arr = np.asarray(arr, dtype=float)
+    #         # Remove NaNs from this array
+    #         arr = arr[~np.isnan(arr)]
+    #
+    #         # Skip empty arrays
+    #         if len(arr) == 0:
+    #             continue
+    #
+    #         # Append the group (outer_key), network (inner_key), and each value
+    #         for val in arr:
+    #             records.append((outer_key, network_key, val))
+    #
+    # df = pd.DataFrame(records, columns=["group", "network", "value"])
+    #
+    # # Optional: filter out any "NaN" group or "medial_wall" network if unwanted
+    # df = df[(df["group"] != "NaN") & (df["network"] != "medial_wall")]
+    df = data_dict
+    plt.figure(figsize=(10, 6))
+
+    sns.barplot(
+        data=df,
+        x="value",
+        y="network_1",
+        hue="network_2",
+        errorbar='sd',
+        palette='CustomCmap_type',
+        orient='h'
+    )
+
+    plt.xlabel("Network")
+    plt.ylabel("Distance (Mean ± SD)")
+    plt.title("")
+    plt.legend(title="Cortical types", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+    plt.tight_layout()
+    plt.show()
 
 
 
@@ -257,9 +315,10 @@ def main():
     yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
     df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
 
-    # load .csv associated with schaefer 400
+    #### load .csv associated with schaefer 400
     df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
     df_label['network'] = df_label['label'].str.extract(r'(Vis|Default|Cont|DorsAttn|Limbic|SalVentAttn|SomMot|medial_wall)')
+    network_labels = ['Vis','Default','Cont','DorsAttn','Limbic','SalVentAttn','SomMot','medial_wall']
     df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
     #print(np.unique(df_yeo_surf[df_yeo_surf.network == 'SalVentAttn'].label.str.strip('7Networks_LRH_SalVentAttn_').values))
     state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
@@ -267,40 +326,10 @@ def main():
     salience = state.copy()
     salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
     state_stack = np.vstack([state, salience])
-    plot_hemispheres(surf_lh, surf_rh, array_name=state_stack, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-                    nan_color=(250, 250, 250, 1), cmap='CustomCmap_yeo', transparent_bg=True)
+    # plot_hemispheres(surf_lh, surf_rh, array_name=state_stack, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+    #                 nan_color=(250, 250, 250, 1), cmap='CustomCmap_yeo', transparent_bg=True)
 
-    # #### upload connectome
-    # connectome = nib.load('/local_raid/data/pbautin/results/micapipe/micapipe_v0.2.0/sub-Pilot014/ses-01/dwi/connectomes/sub-Pilot014_ses-01_space-dwi_atlas-schaefer-400_desc-iFOD2-40M-SIFT2_full-connectome.shape.gii').darrays[0].data[48:, 48:]
-    # connectome = np.triu(connectome, 1) + connectome.T
-    # A_norm = matrix_normalization(connectome, system='continuous', c=1)
-    # plt.imshow(A_norm)
-    # plt.show()
-    #
-    #
-    # ############ Minimum State-to-state energy
-    # T = 1   # time horizon
-    # n_nodes = A_norm.shape[0]
-    # B = np.eye(n_nodes) # set all nodes to control nodes
-    # x0_mat = normalize_state(df_label.network.values ==  'SalVentAttn')
-    #
-    # dict_state_energy = {}
-    # for name in np.unique(df_label.network.values)[:-1]:
-    #     print(name)
-    #     xf_mat = normalize_state(df_label.network.values ==  name)
-    #     #x, u, error = get_control_inputs(A_norm, T, B, x0_mat, xf_mat, system='continuous', rho=1, S='identity', xr='zero', expm_version='scipy')
-    #     e_fast = minimum_energy_fast(A_norm=A_norm, T=T, B=B, x0=x0_mat, xf=xf_mat)[...,0]
-    #     e_fast = np.sum(e_fast)  # sum over nodes
-    #     dict_state_energy.update({name:[e_fast]})
-    #
-    # df_state_energy = pd.DataFrame.from_dict(dict_state_energy, orient='columns')
-    # sns.barplot(data=df_state_energy, palette='CustomCmap_yeo')
-    # plt.show()
-
-
-
-    #################################
-    # load econo atlas
+    #### load econo atlas
     econo_surf_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/economo_conte69_lh.label.gii').darrays[0].data
     econo_surf_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/economo_conte69_rh.label.gii').darrays[0].data
     econo_surf = np.concatenate((econo_surf_lh, econo_surf_rh), axis=0).astype(float)
@@ -313,163 +342,36 @@ def main():
     surf_type[surf_type == 0] = np.nan
     # surf_type_lh = surf_type[:32492]
     # surf_type_rh = surf_type[32492:]
-
-
-    # surf_type_arr = [surf_type[surf_type != i] == 0 for i in np.unique(surf_type)]
-    # surf_type_arr = np.array(surf_type_arr[0])
-    # print(surf_type_arr.shape)
-    # def surf_type_isolation(surf_type_test, i):
-    #     # Work on a copy of the input array to avoid modifying the original
-    #     surf_type_copy = surf_type_test.copy()
-    #     surf_type_copy[surf_type_copy != i] = np.nan
-    #     return surf_type_copy
-    #
-    # # Generate a new array with isolated surf types
-    # print(np.unique(surf_type))
-    # surf_type_arr = np.array([surf_type_isolation(surf_type, i) for i in np.unique(surf_type)])
-    # print(np.unique(surf_type_arr))
-    #
-    # plot_hemispheres(surf_lh, surf_rh, array_name=surf_type_arr[:6], size=(800, 1400), share='both', background=(0,0,0),
-    #                          nan_color=(250, 250, 250, 1), cmap='CustomCmap_type', transparent_bg=True)
     # plot_hemispheres(surf_lh, surf_rh, array_name=surf_type, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-    #                          nan_color=(250, 250, 250, 1), cmap='CustomCmap_type', transparent_bg=True)
+    #                         nan_color=(250, 250, 250, 1), cmap='CustomCmap_type', transparent_bg=True)
+
+    #### upload connectome
+    connectome = nib.load('/local_raid/data/pbautin/results/micapipe/micapipe_v0.2.0/sub-Pilot014/ses-01/dwi/connectomes/sub-Pilot014_ses-01_space-dwi_atlas-schaefer-400_desc-iFOD2-40M-SIFT2_full-connectome.shape.gii').darrays[0].data[48:, 48:]
+    connectome = np.triu(connectome, 1) + connectome.T
+    connectome_dist = bct_alg.distance_wei_floyd(connectome,transform='inv')[0]
+    dist_network = {label:np.nanmean(connectome_dist[np.where(df_label['network'].values == label)[0],:], axis=0) for label in network_labels}
+    for label in network_labels:
+        df_label['dist_'+label] = dist_network[label]
+    df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
+    network_dist = [df_yeo_surf['dist_'+label].values for label in network_labels[:-1]]
+    print(network_labels[:-1])
+    plot_hemispheres(surf_lh, surf_rh, array_name=network_dist, size=(1200, 1200), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+                    nan_color=(250, 250, 250, 1), transparent_bg=True, cmap='Purples')
 
 
-
-    ########### network composition
     surf_type[np.isnan(surf_type)] = 7
-    unique_vals = np.unique(surf_type)
-    salience_composition = {val: [] for val in unique_vals}
-    dict_state_composition = {}
-    dict_state = {}
-    for s_name in state_name:
-        dict_value ={}
-        # isolate state
-        val = (state == np.where(state_name == s_name)[0][0]).astype(float)
-        val[val == 0] = np.nan
-        dict_state.update({s_name:val})
-        # find composition
-        composition = surf_type[~np.isnan(val)] * val[~np.isnan(val)]
-        unique, counts = np.unique(composition, return_counts=True)
-        counts = (counts / len(composition)) * 100
-        counts_dict = dict(zip(unique, counts))
-        for value in unique_vals:
-            dict_value.update({econ_types[int(value)-1]:counts_dict.get(value, 0)})
-            dict_state_composition.update({s_name:dict_value})
-    print("dict {}".format(dict_state_composition))
-    #barplot_types(dict_state_composition, yeo7_colors)
+    unique_vals = np.unique(surf_type).astype(int)
+    print(unique_vals)
+    salience_dist_cyto = {econ_types[val-1]: {label:df_yeo_surf['dist_'+label].values[np.where(surf_type == val)] for label in network_labels} for val in unique_vals}
+    print([np.where(state == np.where(state_name == label)[0][0]) for label in state_name])
+    salience_dist_network = {label_1: {label:df_yeo_surf['dist_'+label].values[np.where(state == np.where(state_name == label)[0][0])] for label in state_name} for label_1 in state_name}
+    df_dist_network = pd.DataFrame.from_dict(salience_dist_network)
+    print(df_dist_network)
+    violin_plot(salience_dist_network)
+    ridge_plot(salience_dist_cyto)
 
 
 
-
-    # salience = state == np.where(state_name == 'SalVentAttn')[0][0]
-    # salience = salience.astype(float)
-    # salience[salience == 0] = np.nan
-    # salience_lh = salience.astype(float)[:32492]
-    # salience_rh = salience.astype(float)[32492:]
-    # salience = salience.astype(float) *  np.where(state_name == 'SalVentAttn')[0][0]
-    # salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
-    # print(salience)
-    # state[state == 7] = np.nan
-    # print(np.unique(state))
-    # #print(np.where(state_name == 'SalVentAttn'))
-    # #salience = df['label'].values == 'SalVentAttn'
-    # #salience = salience.astype(float)
-    #
-    # # print(salience.shape)
-
-    data_bigbrain = np.loadtxt('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_den-32k_desc-profiles.txt', delimiter=',')
-    salience_bigbrain = data_bigbrain[:,~np.isnan(salience)] * salience[~np.isnan(salience)]
-    plt.imshow(salience_bigbrain, aspect=50)
-    plt.show()
-    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
-    gm.fit(salience_bigbrain.T)
-    # sorted_indices = np.argsort(gm.gradients_[:, 0])
-    # salience_bigbrain = salience_bigbrain[:, sorted_indices]
-    # plt.imshow(salience_bigbrain, aspect=50)
-    # plt.show()
-    # print(gm.gradients_[:, 0])
-    # colors = plt.cm.coolwarm((gm.gradients_[:, 0] + np.abs(np.min(gm.gradients_[:, 0]))) / (np.max(gm.gradients_[:, 0]) + np.abs(np.min(gm.gradients_[:, 0]))))
-    # for i in range(len(salience_bigbrain[0,:])):
-    #     plt.plot(range(0,50), salience_bigbrain[:,i], color=colors[i])
-    # plt.show()
-
-
-    arr = np.zeros(64984)
-    arr[arr == 0] = np.nan
-    arr[~np.isnan(salience)] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
-    plot_hemispheres(surf_lh, surf_rh, array_name=arr, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-                             nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True)
-
-
-    # load the conte69 hemisphere surfaces and spheres
-    from scipy.spatial import KDTree
-    fsLR_lh = nib.load('/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/surf/sub-mni_ses-01_hemi-L_space-nativepro_surf-fsLR-32k_label-white.surf.gii').darrays[0].data
-    fsLR_rh = nib.load('/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/surf/sub-mni_ses-01_hemi-R_space-nativepro_surf-fsLR-32k_label-white.surf.gii').darrays[0].data
-    coords = np.concatenate([fsLR_lh, fsLR_rh])
-    tree = KDTree(coords)
-
-    tractogram_f = nib.streamlines.load('/local_raid/data/pbautin/data/dTOR_full_tractogram_full.tck')
-    tractogram = tractogram_f.streamlines
-    print(tractogram)
-    endpoints = [(sl[0], sl[-1]) for sl in tractogram]
-    print(endpoints)
-
-    # --- Step 5: For each endpoint, find the nearest vertex and assign that value ---
-    vertex_values = arr
-    streamline_values = []  # List to store values per streamline, e.g., tuple (start_val, end_val)
-    for start_pt, end_pt in endpoints:
-        dist_start, idx_start = tree.query(start_pt)
-        dist_end, idx_end = tree.query(end_pt)
-
-        # Optionally, define a cutoff distance to ensure endpoint is "close enough" to surface
-        # For example, if we only trust assignments when endpoint is within 2 mm of surface:
-        cutoff = 2.0
-        if dist_start <= cutoff:
-            start_val = vertex_values[idx_start]
-        else:
-            start_val = np.nan  # or some default value
-
-        if dist_end <= cutoff:
-            end_val = vertex_values[idx_end]
-        else:
-            end_val = np.nan
-
-        streamline_values.append(np.nanmean([start_val, end_val]))
-
-    num_streamlines = len(tractogram)
-    streamline_arr = np.zeros(num_streamlines)
-    streamline_values = np.asarray(streamline_values)
-    streamline_values[np.isnan(streamline_values)] = 0
-    streamline_arr = streamline_values
-    mask = (streamline_arr != 0)
-    streamline_arr = (streamline_arr - np.min(streamline_arr)) / (np.max(streamline_arr) - np.min(streamline_arr))
-    filtered_tractogram = [tractogram[i] for i in range(len(tractogram)) if mask[i]]
-    filtered_streamline_arr = streamline_arr[mask]
-    new_tractogram = nib.streamlines.Tractogram(filtered_tractogram, affine_to_rasmm=tractogram_f.tractogram.affine_to_rasmm)
-    cmap = mp.colormaps['coolwarm']
-    color = (cmap(filtered_streamline_arr)[:, 0:3] * 255).astype(np.uint8)
-    tmp = [np.tile(color[i], (len(new_tractogram.streamlines[i]), 1))
-           for i in range(len(new_tractogram.streamlines))]
-    new_tractogram.data_per_point['color'] = tmp
-    trk_file = nib.streamlines.TrkFile(new_tractogram)
-    trk_file.save('/local_raid/data/pbautin/data/output_tractogram_with_dps.trk')
-
-    #
-    # yeo7_colors = mp.colors.ListedColormap(np.array([
-    #                         [0, 118, 14, 255],
-    #                         [230, 148, 34, 255],
-    #                         [205, 62, 78, 255],
-    #                         [120, 18, 134, 255],
-    #                         [220, 248, 164, 255],
-    #                         [70, 130, 180, 255],
-    #                         [196, 58, 250, 255]]) / 255)
-    # mp.colormaps.register(name='CustomCmap_yeo', cmap=yeo7_colors)
-    # state = np.vstack([state, salience])
-    # plot_hemispheres(surf_lh, surf_rh, array_name=state, size=(1200, 600), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-    #                          nan_color=(250, 250, 250, 1), cmap='CustomCmap_yeo', transparent_bg=True)
-    # plot_hemispheres(surf_lh, surf_rh, array_name=salience, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-    #                          nan_color=(250, 250, 250, 1), cmap='CustomCmap_yeo', transparent_bg=True)
 
 
 
