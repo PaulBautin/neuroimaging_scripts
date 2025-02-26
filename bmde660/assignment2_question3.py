@@ -21,6 +21,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as integrate
 
+def fwhm(t, f):
+    f_half = (np.min(f) + np.max(f)) / 2  # Half maximum value
+
+    # Find indices where f crosses half max
+    indices = np.where(f <= f_half)[0]
+
+    # Compute FWHM as the difference between first and last crossing
+    return t[indices[-1]], t[indices[0]], t[indices[-1]] - t[indices[0]]
+
 def rotate_z(vector: np.ndarray, theta: float) -> np.ndarray:
     """
     Rotates a 3D vector around the Z-axis by an angle theta (in radians).
@@ -91,7 +100,7 @@ params = {'font.size': 22}
 plt.rcParams.update(params)
 
 ########### Load the .mat file
-df = pd.DataFrame(np.array(h5py.File("/local_raid/data/pbautin/downloads/RFpulse.mat")['RFpulse']).T, columns=["phase", "amplitude"])
+df = pd.DataFrame(np.array(h5py.File("/home/pabaua/Downloads/RFpulse.mat")['RFpulse']).T, columns=["phase", "amplitude"])
 df['t'] = np.linspace(0, 6E-3, df.shape[0]) 
 df['B1'] =  df['amplitude'] * np.exp(df['phase'] * ((np.pi)/180) * 1j)
 
@@ -116,9 +125,11 @@ plt.tight_layout()
 plt.show()
 
 ########### FIND B1 MAX
-integral_B1 = np.trapz(np.real(df['B1']), df['t'])
+integral_B1 = scipy.integrate.simpson(np.real(df['B1']), x=df['t'])
+print(integral_B1)
 B1_max = (np.pi) / (26.7522E7 * integral_B1)
 B1_max_microtesla = B1_max * 1E6
+print(B1_max)
 # Normalize B1 based on max value
 df['B1'] *= B1_max
 df['amplitude'] *= B1_max
@@ -148,12 +159,11 @@ for n in offset_frequency:
     # Compute longitudinal magnetization
     M_freq.append(M[2])
 
-# Plot the frequency response
+# Plot the frequency response and FWHM
+print(fwhm(offset_frequency/1000, M_freq))
 plt.plot(offset_frequency/1000, M_freq)
 plt.xlabel("Offset Frequency (kHz)")
 plt.ylabel("inversion profile (Mz)")
 plt.title("Bloch Simulation Frequency Response")
 plt.grid()
 plt.show()
-
-
