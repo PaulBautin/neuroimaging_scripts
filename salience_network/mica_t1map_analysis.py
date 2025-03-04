@@ -52,6 +52,7 @@ from nctpy.utils import (
     get_fdr_p,
     expand_states
 )
+from sklearn.decomposition import FastICA
 
 
 from sklearn.linear_model import LinearRegression
@@ -143,6 +144,7 @@ def build_mpc(data, parc=None, idxExclude=None):
 
     # Output MPC, microstructural profiles, and problem nodes
     return (MPC, I, problemNodes)
+ 
 
 def main():
     #### set custom plotting parameters
@@ -181,10 +183,10 @@ def main():
 
     #### T1map 
     # plot surface intensity profile
-    t1map_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC011/ses-03/mpc/acq-T1map/sub-PNC011_ses-03_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
+    t1map_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC024/ses-a2/mpc/acq-T1map/sub-PNC024_ses-a2_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
     t1map_profile[:,(mask_5k == 0)] = np.nan
     plot_hemispheres(surf5k_lh, surf5k_rh, array_name=t1map_profile[5,:], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-                             nan_color=(0, 0, 0, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
+                             nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
     
     # # Whole brain gradient
     # t1map_profile_wo_nan = t1map_profile[:,(mask_5k == 1)]
@@ -204,7 +206,7 @@ def main():
     mtsat_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC011/ses-03/mpc/acq-MTSAT/sub-PNC011_ses-03_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
     mtsat_profile[:,(mask_5k == 0)] = np.nan
     plot_hemispheres(surf5k_lh, surf5k_rh, array_name=mtsat_profile[5,:], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
-                             nan_color=(0, 0, 0, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
+                             nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
     
     # # Whole brain gradient
     # mtsat_profile_wo_nan = mtsat_profile[:,(mask_5k == 1)]
@@ -217,6 +219,37 @@ def main():
     # arr[(mask_5k == 1)] = gm.gradients_[:, 0]
     # plot_hemispheres(surf5k_lh, surf5k_rh, array_name=arr, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
     #                          nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
+
+
+    #### T2 star
+    # plot surface intensity profile
+    t2star_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC024/ses-a2/mpc/acq-T1map/sub-PNC024_ses-a2_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
+    t2star_profile[:,(mask_5k == 0)] = np.nan
+    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=t2star_profile[5,:], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+                             nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
+
+
+    ###### ICA
+    # Stack multimodal myelin-sensitive maps
+    stacked_data = np.vstack((t1map_profile, mtsat_profile, t2star_profile))
+    stacked_data = stacked_data[:, mask_5k==1]
+    print(stacked_data.shape)
+
+    # Perform ICA
+    n_components = 3  # Define number of components based on prior knowledge or explained variance
+    ica = FastICA(n_components=n_components, random_state=42)
+    independent_components = ica.fit_transform(stacked_data.T)
+
+    # Reconstruct component maps in the full brain space
+    ica_maps = np.full((n_components, mask_5k.shape[0]), np.nan)
+    ica_maps[:, mask_5k == 1] = independent_components.T
+
+    # Plot ICA-derived components on the brain surface
+    for i in range(n_components):
+        plot_hemispheres(surf5k_lh, surf5k_rh, array_name=ica_maps[i, :], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+                             nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
+
+
 
 
     #### 7T network gradient

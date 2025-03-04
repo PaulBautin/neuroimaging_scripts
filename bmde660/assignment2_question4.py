@@ -4,13 +4,11 @@ from __future__ import division
 # -*- coding: utf-8
 #########################################################################################
 #
-# Effective connectivity of the salience network
+# Assignement 2 question 4
 #
-# example:
 # ---------------------------------------------------------------------------------------
-# Authors: Paul Bautin
+# Author: Paul Bautin with help from ChatGPT 3
 #
-# About the license: see the file LICENSE
 #########################################################################################
 
 
@@ -31,14 +29,12 @@ def adiabatic_sech(t, beta, n):
     """Amplitude modulation (AM) using a hyperbolic secant function."""
     AM = 1 / np.cosh(beta * ((t - 4E-3) ** n))
     FM = integrate.cumulative_simpson(AM ** 2, x=t, initial=0)
-    FM = beta * np.tanh(beta * (t - 4E-3))
-    #FM = 2000 * FM / np.max(FM)
     return AM, FM
 
 # Values of n
 n_values = [1, 2, 4, 8]
 t = np.linspace(0, 8E-3, 1000)
-beta = 1000  # Modulation parameter
+beta =   # Modulation parameter
 
 # Plot AM and FM for different values of n
 fig, axes = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
