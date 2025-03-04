@@ -4,18 +4,14 @@ from __future__ import division
 # -*- coding: utf-8
 #########################################################################################
 #
-# Effective connectivity of the salience network
+# Assignement 2 question 4
 #
-# example:
 # ---------------------------------------------------------------------------------------
-# Authors: Paul Bautin
+# Author: Paul Bautin with help from ChatGPT 3
 #
-# About the license: see the file LICENSE
 #########################################################################################
 
 
-import scipy.io
-import h5py
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,24 +23,25 @@ plt.rcParams.update(params)
 
 ####### QUESTION 4
 # Define AM and FM functions
-def adiabatic_sech(t, beta, n):
+def adiabatic_sech(t, beta, n, w_max):
     """Amplitude modulation (AM) using a hyperbolic secant function."""
-    AM = 1 / np.cosh(beta * ((t - 4E-3) ** n))
-    FM = integrate.cumulative_simpson(AM ** 2, x=t, initial=0)
-    FM = beta * np.tanh(beta * (t - 4E-3))
+    # AM with normalized time [-1, 1]
+    AM = 1 / np.cosh(beta * (((t - 4E-3)/4E-3) ** n))
+    FM = 2000 * (integrate.cumulative_simpson(AM ** 2, x=t, initial=0) / np.max(integrate.cumulative_simpson(AM ** 2, x=t, initial=0)) - 0.5)
+    #FM = beta * np.tanh(beta * (t - 4E-3))
     #FM = 2000 * FM / np.max(FM)
     return AM, FM
 
 # Values of n
 n_values = [1, 2, 4, 8]
 t = np.linspace(0, 8E-3, 1000)
-beta = 1000  # Modulation parameter
+beta = 5.29829 # Modulation parameter based on article doi:10.1006/jmre.2001.2340
 
 # Plot AM and FM for different values of n
 fig, axes = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
 
 for n in n_values:
-    am_sech, fm_sech = adiabatic_sech(t, beta, n)
+    am_sech, fm_sech = adiabatic_sech(t, beta, n, w_max=1000)
     axes[0].plot(t * 1e3, am_sech, label=f"n={n}")  # Convert time to ms
     axes[1].plot(t * 1e3, fm_sech, label=f"n={n}")
 
