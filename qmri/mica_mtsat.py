@@ -211,7 +211,7 @@ def compute_mtr(nii_mt1, nii_mt0, threshold_mtr=100):
 
 def compute_mtsat(nii_mt, nii_pd, nii_t1,
                   tr_mt, tr_pd, tr_t1,
-                  fa_mt, fa_pd,
+                  fa_mt, fa_pd, fa_t1,
                   nii_b1map=None):
     """
     Compute MTsat (in percent) and T1 map (in s) based on FLASH scans
@@ -224,10 +224,13 @@ def compute_mtsat(nii_mt, nii_pd, nii_t1,
     :param tr_t1: Float: Repetition time (in s) for T1w image
     :param fa_mt: Float: Flip angle (in deg) for MTw image
     :param fa_pd: Float: Flip angle (in deg) for PDw image
+    :param fa_t1: Float: Flip angle (in deg) for T1w image
     :param nii_b1map: Image object for B1-map (optional)
     :return: MTsat and T1map.
     """
-
+    # params
+    nii_t1map = \
+        None  # it would be possible in the future to input T1 map from elsewhere (e.g. MP2RAGE). Note: this T1map
     # needs to be in s unit.
     b1correctionfactor = \
         0.4  # empirically defined in https://www.frontiersin.org/articles/10.3389/fnins.2013.00095/full#h3
@@ -237,47 +240,79 @@ def compute_mtsat(nii_mt, nii_pd, nii_t1,
     mtsat_threshold = 1  # we expect MTsat to be on the order of 0.01
 
     # Convert flip angles into radians
-    print(fa_mt)
     fa_mt_rad = np.radians(fa_mt)
-    print(fa_mt_rad)
     fa_pd_rad = np.radians(fa_pd)
-    print(tr_mt)
+    fa_t1_rad = np.radians(fa_t1)
 
-    nii_mt = nii_mt.get_fdata().astype(np.float64)
-    nii_pd = nii_pd.get_fdata().astype(np.float64)
-    nii_t1_img = nii_t1
-    nii_t1map = nii_t1.get_fdata().astype(np.float64) / 1000
-    nii_b1map = nii_b1map.get_fdata().astype(np.float64)
-
-
-    # # Scale magnitude in nT/V
-    # GAMMA = 2.675e8  # Proton's gyromagnetic ratio (rad/(T.s))
-    # SATURATION_FA = 90  # Saturation flip angle hard-coded in TFL B1 mapping sequence (deg)
-    #
-    # nii_b1map = nii_b1map.get_fdata().astype(np.float64) / 10  # Siemens magnitude values are stored in degrees x10
-    # nii_b1map[nii_b1map > 180] = 180  # Values higher than 180 degrees are due to noise
-    # # Calculate B1+ efficiency (1ms, pi-pulse) and scale by the ratio of the measured FA to the saturation FA.
-    # # Get the Transmission amplifier reference amplitude
-    # amplifier_voltage = 256.938  # [V]
-    # socket_voltage = amplifier_voltage * 10 ** -0.095  # -1.9dB voltage loss from amplifier to coil socket
-    # nii_b1map = (nii_b1map / SATURATION_FA) #* (np.pi / (GAMMA * socket_voltage * 1e-3)) * 1e9  # nT/V
+    nii_t1 = nii_t1.get_fdata()
+    nii_pd = nii_pd.get_fdata()
+    nii_mt = nii_mt.get_fdata()
+    if nii_b1map is not None:
+            nii_b1map = nii_b1map.get_fdata()
 
     # ignore warnings from division by zeros (will deal with that later)
     seterr_old = np.seterr(over='ignore', divide='ignore', invalid='ignore')
 
-
-    nii_mtsat = np.abs((((nii_pd * fa_mt_rad * nii_b1map) / nii_mt) - 1) * (tr_mt / nii_t1map) - ((fa_mt_rad * nii_b1map)**2 / 2)) * 100
-    nii_mtsat[nii_mtsat > 100] = 0
+    # check if a T1 map was given in input; if not, compute R1
+    if nii_t1map is None:
+        # compute R1
+        logger.info("Compute T1 map...")
+        r1map = 0.5 * np.true_divide((fa_t1_rad / tr_t1) * nii_t1 - (fa_pd_rad / tr_pd) * nii_pd,
+                                     nii_pd / fa_pd_rad - nii_t1 / fa_t1_rad)
+        # apply B1 correction if available
+        if nii_b1map is not None:
+            b1_squared = np.multiply(nii_b1map, nii_b1map)
+            r1map = np.multiply(r1map, b1_squared)
+        # remove nans and clip unrelistic values
+        r1map = np.nan_to_num(r1map)
+        ind_unrealistic = np.where(r1map < r1_threshold)
+        if ind_unrealistic[0].size:
+            logger.warning("R1 values were found to be lower than {}. They will be set to inf, producing T1=0 for "
+                           "these voxels.".format(r1_threshold))
+            r1map[ind_unrealistic] = np.inf  # set to infinity so that these values will be 0 on the T1map
+        # compute T1
+        nii_t1map = nii_mt.copy()
+        nii_t1map = 1. / r1map
+    else:
+        logger.info("Use input T1 map.")
+        r1map = 1. / nii_t1map
 
     # Compute A
-    logger.info("Compute MTsat...")
+    logger.info("Compute A...")
+    a = (tr_pd * fa_t1_rad / fa_pd_rad - tr_t1 * fa_pd_rad / fa_t1_rad) * \
+        np.true_divide(np.multiply(nii_pd, nii_t1, dtype=float),
+                       tr_pd * fa_t1_rad * nii_t1 - tr_t1 * fa_pd_rad * nii_pd)
+    # apply B1 correction if available
+    if nii_b1map is not None:
+        a = np.divide(a, nii_b1map)
 
+    # Compute MTsat
+    logger.info("Compute MTsat...")
+    nii_mtsat = nii_mt.copy()
+    nii_mtsat = tr_mt * np.multiply((fa_mt_rad * np.true_divide(a, nii_mt) - 1),
+                                         r1map, dtype=float) - (fa_mt_rad ** 2) / 2.
+    # remove nans and clip unrelistic values
+    nii_mtsat = np.nan_to_num(nii_mtsat)
+    ind_unrealistic = np.where(np.abs(nii_mtsat) > mtsat_threshold)
+    if ind_unrealistic[0].size:
+        logger.warning("MTsat values were found to be larger than {}. They will be set to zero for these voxels."
+                       "".format(mtsat_threshold))
+        nii_mtsat[ind_unrealistic] = 0
+    # convert into percent unit (p.u.)
+    nii_mtsat *= 100
+
+    # Apply B1 correction to result
+    # Weiskopf, N., Suckling, J., Williams, G., Correia, M.M., Inkster, B., Tait, R., Ooi, C., Bullmore, E.T., Lutti,
+    # A., 2013. Quantitative multi-parameter mapping of R1, PD(*), MT, and R2(*) at 3T: a multi-center validation.
+    # Front. Neurosci. 7, 95.
+    if nii_b1map is not None:
+        nii_mtsat = np.true_divide(nii_mtsat * (1 - b1correctionfactor),
+                                        (1 - b1correctionfactor * nii_b1map))
 
     # set back old seterr settings
     np.seterr(**seterr_old)
 
-    nii_mtsat = nib.Nifti1Image(nii_mtsat, nii_t1_img.affine, nii_t1_img.header)
-    return nii_mtsat
+    return nii_mtsat, nii_t1map
 
 
 def resample_image(source_img, target_img):
@@ -333,6 +368,8 @@ def main(argv: Sequence[str]):
         arguments.famt = fetch_metadata(get_json_file_name(arguments.mt, check_exist=True), 'FlipAngle')
     if arguments.fapd is None:
         arguments.fapd = fetch_metadata(get_json_file_name(arguments.pd, check_exist=True), 'FlipAngle')
+    if arguments.fat1 is None:
+        arguments.fat1 = fetch_metadata(get_json_file_name(arguments.t1, check_exist=True), 'FlipAngle')
 
     # Convert TR and Flip Angle values to float
     tr_mt = float(arguments.trmt)
@@ -340,12 +377,16 @@ def main(argv: Sequence[str]):
     tr_t1 = float(arguments.trt1)
     fa_mt = float(arguments.famt)
     fa_pd = float(arguments.fapd)
+    fa_t1 = float(arguments.fat1)
 
     # Compute MTsat
-    nii_mtsat = compute_mtsat(nii_mt, nii_pd, nii_t1,
+    img_mtsat, img_t1map = compute_mtsat(nii_mt, nii_pd, nii_t1,
                                          tr_mt, tr_pd, tr_t1,
-                                         fa_mt, fa_pd,
+                                         fa_mt, fa_pd, fa_t1,
                                          nii_b1map=nii_b1map)
+    nii_mtsat = nib.Nifti1Image(img_mtsat, nii_t1.affine, nii_t1.header)
+    nii_t1map = nib.Nifti1Image(img_t1map, nii_t1.affine, nii_t1.header)
+
     # Compute MTr
     nii_mtr = compute_mtr(nii_mt, nii_pd)
 
@@ -353,10 +394,12 @@ def main(argv: Sequence[str]):
     logger.info('Generate output files...')
     nib.save(nii_mtsat, arguments.omtsat)
     nib.save(nii_mtr, arguments.omtr)
+    nib.save(nii_t1map, arguments.ot1map)
 
 
     logger.info(f"MTsat map saved to {arguments.omtsat}")
     logger.info(f"MTR map saved to {arguments.omtr}")
+    logger.info(f"T1 map saved to {arguments.ot1map}")
 
 if __name__ == "__main__":
     main(sys.argv[1:])

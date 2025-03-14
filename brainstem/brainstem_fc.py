@@ -146,77 +146,81 @@ def weight_to_length(W, epsilon=1e-6):
     W = np.array(W)  # Ensure it's a NumPy array
     W_safe = np.where(W > 0, W, epsilon)  # Avoid division by zero
     L = 1.0 / W_safe  # Convert to length
-    L[W == 0] = 100000  # Set zero-weight connections to infinity
+    L[W == 0] = 1000000  # Set zero-weight connections to infinity
     return L
 
 
+params = {"ytick.color" : "w",
+            "xtick.color" : "w",
+            "axes.labelcolor" : "w",
+            "axes.edgecolor" : "w",
+            'font.size': 22}
+plt.rcParams.update(params)
+plt.style.use('dark_background')
+
 #### load yeo atlas 7 network
-atlas_yeo_lh = nib.load('/home/pabaua/dev_mni/micapipe/parcellations/schaefer-400_conte69_lh.label.gii').darrays[0].data + 1000
-atlas_yeo_rh = nib.load('/home/pabaua/dev_mni/micapipe/parcellations/schaefer-400_conte69_rh.label.gii').darrays[0].data + 1800
+atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_conte69_lh.label.gii').darrays[0].data + 1000
+atlas_yeo_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_conte69_rh.label.gii').darrays[0].data + 1800
 atlas_yeo_rh[atlas_yeo_rh == 1800] = 2000
 yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
+df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
+df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
+df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
 
-
-df_schaefer_400 = pd.read_csv('/home/pabaua/Downloads/region_info_Schaefer400.csv', index_col=0)
-df_schaefer_400_brainstem = df_schaefer_400[df_schaefer_400.structure == "brainstem"]
-print(df_schaefer_400)
-
+df_schaefer_400 = pd.read_csv('/local_raid/data/pbautin/data/region_info_Schaefer400.csv', index_col=0)
+df_schaefer_400.rename(columns={"labels": "label"}, inplace=True)
 
 # Load functional matrix
-FC = np.load('/home/pabaua/Downloads/brainstemfc_mean_corrcoeff_full_Schaefer400.npy')
-print(FC)
+FC = np.load('/local_raid/data/pbautin/data/brainstemfc_mean_corrcoeff_full_Schaefer400.npy')
 
 
 # Initialize arousal at brainstem node (e.g., first node)
-LC_r = df_schaefer_400.labels == "LC_r"
-LC_l = df_schaefer_400.labels == "LC_l"
+LC_r = df_schaefer_400.label == "LC_r"
+LC_l = df_schaefer_400.label == "LC_l"
 LC = LC_r + LC_l
 
 df_schaefer_400['init_arousal'] = LC
+df_schaefer_400_brainstem = df_schaefer_400[df_schaefer_400.structure == "brainstem"]
 
-fig = plt.figure(figsize=(12, 12))
-ax = fig.add_subplot(projection='3d')
-sc = ax.scatter(df_schaefer_400.x, df_schaefer_400.y, df_schaefer_400.z, cmap='viridis', s=50, c=df_schaefer_400['init_arousal'])
-ax.axis('equal')
-ax.view_init(0,-90,0)
-ax.axis('off')
-cbar = plt.colorbar(sc, ax=ax, shrink=0.6, aspect=20)
+# Create figure with multiple subplots (1 row, 3 columns)
+fig, axes = plt.subplots(1, 3, figsize=(27, 9), subplot_kw={'projection': '3d'})
+
+# Define different view angles
+view_angles = [(0, 0), (0, -90), (0, 180)]
+
+for ax, (elev, azim) in zip(axes, view_angles):
+    sc = ax.scatter(df_schaefer_400_brainstem.x, df_schaefer_400_brainstem.y, df_schaefer_400_brainstem.z, 
+                    cmap='Purples', s=100, c=df_schaefer_400_brainstem['init_arousal'], alpha=0.8)
+    ax.view_init(elev, azim)  # Set view angles
+    ax.axis('equal')
+    ax.axis('off')
+
+# Add colorbar to the right of the figure
+#cbar = fig.colorbar(sc, ax=axes, shrink=1, aspect=100, location='bottom')
 plt.show()
+
 
 # Simulate arousal wave propagation
-FC = weight_to_length(FC)
-_, diff_eff = diffusion_efficiency(FC)
-diff_eff = mean_first_passage_time(FC)
+#FC = weight_to_length(FC)
+#_, FC = diffusion_efficiency(FC)
+#FC = mean_first_passage_time(FC)
 active_indices = np.where(df_schaefer_400['init_arousal'] == 1)[0]
 
-fig = plt.figure(figsize=(12, 12))
-ax = fig.add_subplot(projection='3d')
-sc = ax.scatter(df_schaefer_400.x, df_schaefer_400.y, df_schaefer_400.z, cmap='viridis', s=50, c=np.mean(np.log(diff_eff[active_indices,:]), axis=0))
-ax.axis('equal')
-ax.view_init(0,-90,0)
-ax.axis('off')
-cbar = plt.colorbar(sc, ax=ax, shrink=0.6, aspect=20)
-plt.show()
 
-
-
-# Iterate over selected time points and map the arousal wave to the cortical regions
-time_steps = [1, 3, 5, 7, 9]
-mapped_waves = []
-for t in time_steps:
-    mapped_wave = map_to_labels(arousal_wave[t, 81:], yeo_surf) 
-    #mapped_wave[np.isnan(mapped_wave)] = 0
-    mapped_wave = mapped_wave / np.max(map_to_labels(arousal_wave[t, 81:], yeo_surf))  # Map to cortical surface
-    mapped_waves.append(mapped_wave)  # Append the mapped wave to the list
-mapped_waves_stack = np.stack(mapped_waves, axis=0)
-print(mapped_waves_stack.shape)
+df_schaefer_400['lc_conn'] = np.mean(FC[active_indices,:], axis=0)
+df_yeo_surf = df_yeo_surf.merge(df_schaefer_400, on='label', validate="many_to_one", how='left')
+print(df_yeo_surf)
+#surf_map = map_to_labels(np.mean(diff_eff[active_indices,:], axis=0), yeo_surf) 
 
 # Plot the stacked waves for each time point
 surf_lh, surf_rh = load_conte69()
 plot_hemispheres(
-    surf_lh, surf_rh, array_name=mapped_waves_stack,
+    surf_lh, surf_rh, array_name=df_yeo_surf.lc_conn.values,
     size=(1200, 300), zoom=1.25, color_bar='bottom',
     share='both', background=(0, 0, 0),
-    nan_color=(250, 250, 250, 1), transparent_bg=True
+    nan_color=(250, 250, 250, 1), transparent_bg=True, cmap="Purples"
 )
+
+
+
 

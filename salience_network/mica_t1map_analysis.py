@@ -185,7 +185,10 @@ def main():
     # plot surface intensity profile
     t1map_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC024/ses-a2/mpc/acq-T1map/sub-PNC024_ses-a2_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
     t1map_profile[:,(mask_5k == 0)] = np.nan
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=t1map_profile[5,:], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+    t1map_map = (t1map_profile[7,:] - np.nanmean(t1map_profile[7,:])) / np.nanstd(t1map_profile[7,:])
+    t1map_map[t1map_map > 3] = 3
+    t1map_map[t1map_map < -3] = -3
+    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=t1map_map, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
                              nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
     
     # # Whole brain gradient
@@ -205,7 +208,10 @@ def main():
     # plot surface intensity profile
     mtsat_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC011/ses-03/mpc/acq-MTSAT/sub-PNC011_ses-03_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
     mtsat_profile[:,(mask_5k == 0)] = np.nan
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=mtsat_profile[5,:], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+    mtsat_map = (mtsat_profile[7,:] - np.nanmean(mtsat_profile[7,:])) / np.nanstd(mtsat_profile[7,:])
+    mtsat_map[mtsat_map > 3] = 3
+    mtsat_map[mtsat_map < -3] = -3
+    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=mtsat_map, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
                              nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
     
     # # Whole brain gradient
@@ -223,15 +229,18 @@ def main():
 
     #### T2 star
     # plot surface intensity profile
-    t2star_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC024/ses-a2/mpc/acq-T1map/sub-PNC024_ses-a2_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
+    t2star_profile = nib.load("/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC024/ses-a2/mpc/acq-T2starmap/sub-PNC024_ses-a2_surf-fsLR-5k_desc-intensity_profiles.shape.gii").darrays[0].data
     t2star_profile[:,(mask_5k == 0)] = np.nan
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=t2star_profile[5,:], size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
+    t2star_map = (t2star_profile[7,:] - np.nanmean(t2star_profile[7,:])) / np.nanstd(t2star_profile[7,:])
+    t2star_map[t2star_map > 3] = 3
+    t2star_map[t2star_map < -3] = -3
+    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=t2star_map, size=(1200, 300), zoom=1.25, color_bar='bottom', share='both', background=(0,0,0),
                              nan_color=(250, 250, 250, 1), cmap='coolwarm', transparent_bg=True, color_range='sym')
 
 
     ###### ICA
     # Stack multimodal myelin-sensitive maps
-    stacked_data = np.vstack((t1map_profile, mtsat_profile, t2star_profile))
+    stacked_data = np.vstack((t1map_map, mtsat_map, t2star_map))
     stacked_data = stacked_data[:, mask_5k==1]
     print(stacked_data.shape)
 
