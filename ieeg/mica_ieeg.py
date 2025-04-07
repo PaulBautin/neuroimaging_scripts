@@ -146,18 +146,18 @@ def register_surface_with_msm(freesurfer_surface, hemisphere, output_dir, fsLR_t
 
     return f"{output_prefix}.gii"
 
-# Example usage
-output_dir = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg"
-fsLR_template_dir = "/local_raid/data/pbautin/software/micapipe/surfaces"
-msm_config = "/path/to/msm_config"
-lh_surface = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_lh.surf.gii"
-rh_surface = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_rh.surf.gii"
+# # Example usage
+# output_dir = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg"
+# fsLR_template_dir = "/local_raid/data/pbautin/software/micapipe/surfaces"
+# msm_config = "/path/to/msm_config"
+# lh_surface = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_lh.surf.gii"
+# rh_surface = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_rh.surf.gii"
 
-lh_registered = register_surface_with_msm(lh_surface, lh_sphere, "L", output_dir, fsLR_template_dir, msm_config)
-rh_registered = register_surface_with_msm(rh_surface, rh_sphere, "R", output_dir, fsLR_template_dir, msm_config)
+# lh_registered = register_surface_with_msm(lh_surface, lh_sphere, "L", output_dir, fsLR_template_dir, msm_config)
+# rh_registered = register_surface_with_msm(rh_surface, rh_sphere, "R", output_dir, fsLR_template_dir, msm_config)
 
-print(f"Left hemisphere registered to fsLR: {lh_registered}")
-print(f"Right hemisphere registered to fsLR: {rh_registered}")
+# print(f"Left hemisphere registered to fsLR: {lh_registered}")
+# print(f"Right hemisphere registered to fsLR: {rh_registered}")
 
 
 
@@ -182,6 +182,7 @@ colors = ['white', 'purple', 'orange', 'red', 'blue']  # white for 0 (no channel
 custom_cmap = ListedColormap(colors)
 
 # Create surface polydata objects
+print(points=data['NodesLeft'].shape)
 surf_lh = mesh.mesh_creation.build_polydata(points=data['NodesLeft'], cells=data['FacesLeft'] - 1)
 surf_rh = mesh.mesh_creation.build_polydata(points=data['NodesRight'], cells=data['FacesRight'] - 1)
 mesh.mesh_io.write_surface(surf_lh, '/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_lh.surf.gii')
