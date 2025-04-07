@@ -14,6 +14,7 @@ from brainspace.datasets import load_conte69
 from scipy.spatial import cKDTree
 from matplotlib.colors import ListedColormap
 from scipy.signal import welch
+from scipy.signal import hilbert, butter, filtfilt
 
 params = {"ytick.color" : "w",
             "xtick.color" : "w",
@@ -22,6 +23,100 @@ params = {"ytick.color" : "w",
             'font.size': 22}
 plt.rcParams.update(params)
 plt.style.use('dark_background')
+
+
+def bandpass_filter(data, fs, lowcut, highcut, order=4):
+    """
+    Apply a bandpass filter to the data.
+
+    Parameters:
+    - data: np.ndarray
+        Input signal.
+    - fs: int
+        Sampling frequency.
+    - lowcut: float
+        Low cutoff frequency.
+    - highcut: float
+        High cutoff frequency.
+    - order: int
+        Filter order.
+
+    Returns:
+    - filtered_data: np.ndarray
+        Bandpass-filtered signal.
+    """
+    nyquist = 0.5 * fs
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    b, a = butter(order, [low, high], btype='band')
+    return filtfilt(b, a, data)
+
+def compute_phase_amplitude_coupling(data, fs, low_freq_band, high_freq_band):
+    """
+    Compute cross-frequency coupling using phase-amplitude coupling (PAC).
+
+    Parameters:
+    - data: np.ndarray
+        Input signal (1D array).
+    - fs: int
+        Sampling frequency.
+    - low_freq_band: tuple
+        Low-frequency band (e.g., (4, 8) for theta).
+    - high_freq_band: tuple
+        High-frequency band (e.g., (30, 80) for gamma).
+
+    Returns:
+    - pac: float
+        Modulation Index (MI) as a measure of PAC.
+    """
+    # Bandpass filter for low-frequency and high-frequency bands
+    low_freq_signal = bandpass_filter(data, fs, low_freq_band[0], low_freq_band[1])
+    high_freq_signal = bandpass_filter(data, fs, high_freq_band[0], high_freq_band[1])
+
+    # Extract phase of low-frequency signal
+    low_freq_phase = np.angle(hilbert(low_freq_signal))
+
+    # Extract amplitude envelope of high-frequency signal
+    high_freq_amplitude = np.abs(hilbert(high_freq_signal))
+
+    # Compute phase-amplitude coupling (Modulation Index)
+    n_bins = 18  # Number of phase bins
+    phase_bins = np.linspace(-np.pi, np.pi, n_bins + 1)
+    amplitude_means = np.zeros(n_bins)
+
+    for i in range(n_bins):
+        # Find indices where phase is within the current bin
+        indices = np.where((low_freq_phase >= phase_bins[i]) & (low_freq_phase < phase_bins[i + 1]))[0]
+        # Compute mean amplitude for the current phase bin
+        amplitude_means[i] = np.mean(high_freq_amplitude[indices])
+
+    # Normalize amplitude means
+    amplitude_means /= np.sum(amplitude_means)
+
+    # Compute Modulation Index (MI)
+    pac = -np.sum(amplitude_means * np.log(amplitude_means + 1e-10)) / np.log(n_bins)
+
+    return pac, phase_bins, amplitude_means
+
+def plot_phase_amplitude_coupling(phase_bins, amplitude_means):
+    """
+    Plot phase-amplitude coupling.
+
+    Parameters:
+    - phase_bins: np.ndarray
+        Phase bins (edges).
+    - amplitude_means: np.ndarray
+        Mean amplitude for each phase bin.
+    """
+    # Convert phase bins to centers
+    phase_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
+
+    plt.figure(figsize=(8, 6))
+    plt.bar(phase_centers, amplitude_means, width=2 * np.pi / len(phase_bins), align='center', edgecolor='k')
+    plt.xlabel('Phase (radians)')
+    plt.ylabel('Normalized Amplitude')
+    plt.title('Phase-Amplitude Coupling')
+    plt.show()
 
 
 def RAD(x, centre=False, tau=1):
@@ -105,60 +200,6 @@ def compute_psd(fs, data_w):
 
 import subprocess
 
-def register_surface_with_msm(freesurfer_surface, hemisphere, output_dir, fsLR_template_dir, msm_config):
-    """
-    Perform surface registration using FSL MSM.
-
-    Parameters:
-    - freesurfer_surface: str
-        Path to the FreeSurfer surface file (e.g., lh.pial or rh.pial).
-    - freesurfer_sphere: str
-        Path to the FreeSurfer sphere file (e.g., lh.sphere.reg or rh.sphere.reg).
-    - hemisphere: str
-        Hemisphere ('L' for left, 'R' for right).
-    - output_dir: str
-        Directory to save the output registered surface.
-    - fsLR_template_dir: str
-        Directory containing fsLR template surfaces.
-    - msm_config: str
-        Path to the MSM configuration file.
-
-    Returns:
-    - output_file: str
-        Path to the registered surface.
-    """
-    # Convert FreeSurfer surface and sphere to GIFTI
-    gifti_surface = freesurfer_surface
-
-    # Define fsLR template sphere
-    ref_surface = f"{fsLR_template_dir}/fsLR-32k.{hemisphere}.surf.gii"
-    output_prefix = f"{output_dir}/{hemisphere.lower()}.fsLR-registered"
-
-    # Run MSM
-    subprocess.run([
-        "msm",
-        f"--inmesh={gifti_surface}",
-        f"--refmesh={ref_surface}",
-        f"--indata={gifti_surface}",
-        f"--out={output_prefix}",
-        f"--conf={msm_config}"
-    ], check=True)
-
-    return f"{output_prefix}.gii"
-
-# # Example usage
-# output_dir = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg"
-# fsLR_template_dir = "/local_raid/data/pbautin/software/micapipe/surfaces"
-# msm_config = "/path/to/msm_config"
-# lh_surface = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_lh.surf.gii"
-# rh_surface = "/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_rh.surf.gii"
-
-# lh_registered = register_surface_with_msm(lh_surface, lh_sphere, "L", output_dir, fsLR_template_dir, msm_config)
-# rh_registered = register_surface_with_msm(rh_surface, rh_sphere, "R", output_dir, fsLR_template_dir, msm_config)
-
-# print(f"Left hemisphere registered to fsLR: {lh_registered}")
-# print(f"Right hemisphere registered to fsLR: {rh_registered}")
-
 
 
 ##### Extract the data #####
@@ -182,11 +223,25 @@ colors = ['white', 'purple', 'orange', 'red', 'blue']  # white for 0 (no channel
 custom_cmap = ListedColormap(colors)
 
 # Create surface polydata objects
-print(points=data['NodesLeft'].shape)
 surf_lh = mesh.mesh_creation.build_polydata(points=data['NodesLeft'], cells=data['FacesLeft'] - 1)
 surf_rh = mesh.mesh_creation.build_polydata(points=data['NodesRight'], cells=data['FacesRight'] - 1)
 mesh.mesh_io.write_surface(surf_lh, '/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_lh.surf.gii')
 mesh.mesh_io.write_surface(surf_rh, '/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_rh.surf.gii')
+
+
+##### Cross-frequency coupling #####
+#low_freq_band = (4, 8)  # Theta band
+low_freq_band = (8, 13)  # Alpha band
+#low_freq_band = (13, 30)  # Beta band
+high_freq_band = (30, 80)  # Gamma band
+fs = data['SamplingFrequency'][0][0]
+# Compute PAC for each channel
+pac_values = np.zeros(data_w.shape[0])
+for i in range(data_w.shape[0]):
+    pac, phase_bins, amplitude_means = compute_phase_amplitude_coupling(data_w[i], fs, low_freq_band, high_freq_band)
+    pac_values[i] = pac
+
+print(pac_values.shape)
 
 ##### surface data #####
 # Surface plot with 3mm radius
@@ -198,8 +253,21 @@ radius = 3  # 3mm radius
 for i, channel_pos in enumerate(data['ChannelPosition']):
     nearby_indices = tree.query_ball_point(channel_pos, radius)
     plot_values[nearby_indices] = channel_integers[i]
+    plot_values[nearby_indices] = pac_values[i]
 
-#plot_values[plot_values == 0] = np.nan 
+plot_values[plot_values == 0] = np.nan 
+
+# Plot surface with custom colormap
+plot_hemispheres(surf_lh, surf_rh, 
+                array_name=plot_values, 
+                size=(1200, 300), 
+                zoom=1.25, 
+                color_bar='bottom', 
+                share='both', 
+                background=(0,0,0),
+                nan_color=(250, 250, 250, 1), 
+                cmap='hot',
+                interactive=False)
 
 # Plot surface with custom colormap
 plot_hemispheres(surf_lh, surf_rh, 
