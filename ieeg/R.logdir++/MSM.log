@@ -1,0 +1,3 @@
+/home/pabaua/Downloads/msm_ubuntu_v3 --inmesh=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh_sphere.surf.gii --refmesh=/home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.R.sphere.surf.gii --indata=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh_curvature.func.gii --refdata=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/fsLR-32k.R.midthickness_curvature.func.gii --inanat=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh.surf.gii --refanat=/home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.R.midthickness.surf.gii --out=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/R. --conf=/home/pabaua/Downloads/config_standard_MSM_strain --verbose 
+---------------------------------------------
+

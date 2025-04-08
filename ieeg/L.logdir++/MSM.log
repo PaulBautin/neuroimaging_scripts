@@ -1,0 +1,3 @@
+/home/pabaua/Downloads/msm_ubuntu_v3 --inmesh=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_lh_sphere.surf.gii --refmesh=/home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.L.sphere.surf.gii --indata=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/lh.surf_lh_sulcus.func.gii --refdata=/home/pabaua/dev_mni/micapipe/surfaces/lh.surf_lh_sulcus_fslr32k.func.gii --inanat=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_lh.surf.gii --refanat=/home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.L.midthickness.surf.gii --out=/home/pabaua/dev_mni/neuroimaging_scripts/ieeg/L. --conf=/home/pabaua/Downloads/config_standard_MSM_strain --verbose 
+---------------------------------------------
+
