@@ -63,6 +63,16 @@ LD_PRELOAD=/home/pabaua/msm-env/lib/libstdc++.so.6:$LD_PRELOAD
 
     --conf=/home/pabaua/Downloads/config_standard_MSM_strain \
 
+wb_command -metric-resample \
+    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh_curvature.func.gii\
+    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/R.sphere.reg.surf.gii \
+    /home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.R.sphere.surf.gii \
+    ADAP_BARY_AREA \
+    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/R.surf_rh_sulcus_fslr32k.func.gii  \
+    -area-surfs \
+    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh.surf.gii \
+    /home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.R.midthickness.surf.gii 
+
 
 
 
