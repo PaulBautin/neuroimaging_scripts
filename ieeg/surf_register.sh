@@ -30,6 +30,18 @@ LD_PRELOAD=/home/pabaua/msm-env/lib/libstdc++.so.6:$LD_PRELOAD
 --refanat=/home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.L.midthickness.surf.gii \
 --conf=aMSM_strainconf \
 
+wb_command -metric-resample \
+    /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/plot_values_lh.func.gii \
+    /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/L.sphere.reg.surf.gii \
+    /local_raid/data/pbautin/software/micapipe/surfaces/fsLR-32k.L.sphere.surf.gii \
+    ADAP_BARY_AREA \
+   /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/plot_values_lh_fslr32k.func.gii  \
+    -area-surfs \
+    /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_lh.surf.gii \
+    /local_raid/data/pbautin/software/micapipe/surfaces/fsLR-32k.L.midthickness.surf.gii 
+
+
+
 
 #### right hemisphere ####
 mris_sphere -q /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh.surf.gii \
@@ -64,14 +76,17 @@ LD_PRELOAD=/home/pabaua/msm-env/lib/libstdc++.so.6:$LD_PRELOAD
     --conf=/home/pabaua/Downloads/config_standard_MSM_strain \
 
 wb_command -metric-resample \
-    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh_curvature.func.gii\
-    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/R.sphere.reg.surf.gii \
-    /home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.R.sphere.surf.gii \
+    /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/plot_values_rh.func.gii \
+    /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/R.sphere.reg.surf.gii \
+    /local_raid/data/pbautin/software/micapipe/surfaces/fsLR-32k.R.sphere.surf.gii \
     ADAP_BARY_AREA \
-    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/R.surf_rh_sulcus_fslr32k.func.gii  \
+   /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/plot_values_rh_fslr32k.func.gii  \
     -area-surfs \
-    /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh.surf.gii \
-    /home/pabaua/dev_mni/micapipe/surfaces/fsLR-32k.R.midthickness.surf.gii 
+    /local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/surf_rh.surf.gii \
+    /local_raid/data/pbautin/software/micapipe/surfaces/fsLR-32k.R.midthickness.surf.gii \
+    -largest
+
+
 
 
 

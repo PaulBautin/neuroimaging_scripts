@@ -15,6 +15,7 @@ from scipy.spatial import cKDTree
 from matplotlib.colors import ListedColormap
 from scipy.signal import welch
 from scipy.signal import hilbert, butter, filtfilt
+import nibabel as nib
 
 params = {"ytick.color" : "w",
             "xtick.color" : "w",
@@ -255,21 +256,28 @@ for i, channel_pos in enumerate(data['ChannelPosition']):
     plot_values[nearby_indices] = channel_integers[i]
     plot_values[nearby_indices] = pac_values[i]
 
-plot_values[plot_values == 0] = np.nan 
+# plot_values[plot_values == 0] = np.nan 
+# load ieeg/plot_values_L_fslr32k.func.gii
+plot_values_lh = nib.load('/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/plot_values_lh_fslr32k.func.gii').darrays[0].data
+plot_values_rh = nib.load('/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/plot_values_rh_fslr32k.func.gii').darrays[0].data
+#combine the two hemispheres
+plot_values = np.hstack(np.concatenate((plot_values_lh, plot_values_rh), axis=0)).astype(float)
+print(plot_values.shape)
 
 # Plot surface with custom colormap
-plot_hemispheres(surf_lh, surf_rh, 
-                array_name=plot_values, 
-                size=(1200, 300), 
-                zoom=1.25, 
-                color_bar='bottom', 
-                share='both', 
-                background=(0,0,0),
-                nan_color=(250, 250, 250, 1), 
-                cmap='hot',
-                interactive=False)
+# plot_hemispheres(surf_lh, surf_rh, 
+#                 array_name=plot_values, 
+#                 size=(1200, 300), 
+#                 zoom=1.25, 
+#                 color_bar='bottom', 
+#                 share='both', 
+#                 background=(0,0,0),
+#                 nan_color=(250, 250, 250, 1), 
+#                 cmap='hot',
+#                 interactive=False)
 
 # Plot surface with custom colormap
+surf_lh, surf_rh = load_conte69()
 plot_hemispheres(surf_lh, surf_rh, 
                 array_name=plot_values, 
                 size=(1200, 300), 
