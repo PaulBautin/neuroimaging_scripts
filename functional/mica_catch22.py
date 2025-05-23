@@ -177,6 +177,7 @@ plt.ylabel('Variance explained')
 plt.show()
 
 plot_values = pca.components_[0]
+print(plot_values.shape)
 mask = (yeo_surf != 1000) & (yeo_surf != 2000)
 plot_values = map_to_labels(plot_values, yeo_surf, mask=mask, fill=np.nan)
 # mask = salience
