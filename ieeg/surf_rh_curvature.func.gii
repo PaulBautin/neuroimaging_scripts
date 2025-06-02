@@ -30,7 +30,7 @@ Compiled with OpenMP: YES
       </MD>
       <MD>
          <Name><![CDATA[WorkingDirectory]]></Name>
-         <Value><![CDATA[/home/pabaua]]></Value>
+         <Value><![CDATA[/home/pabaua/dev_mni/neuroimaging_scripts]]></Value>
       </MD>
    </MetaData>
    <LabelTable>

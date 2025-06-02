@@ -6,7 +6,7 @@
    <MetaData>
       <MD>
          <Name><![CDATA[AnatomicalStructurePrimary]]></Name>
-         <Value><![CDATA[CortexLeft]]></Value>
+         <Value><![CDATA[Invalid]]></Value>
       </MD>
       <MD>
          <Name><![CDATA[ProgramProvenance]]></Name>
@@ -30,7 +30,7 @@ Compiled with OpenMP: YES
       </MD>
       <MD>
          <Name><![CDATA[WorkingDirectory]]></Name>
-         <Value><![CDATA[/home/pabaua]]></Value>
+         <Value><![CDATA[/home/pabaua/dev_mni/neuroimaging_scripts]]></Value>
       </MD>
    </MetaData>
    <LabelTable>

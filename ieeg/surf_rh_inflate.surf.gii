@@ -8,7 +8,7 @@
       </MD>
       <MD>
          <Name><![CDATA[Date]]></Name>
-         <Value><![CDATA[Mon Apr  7 18:05:12 2025]]></Value>
+         <Value><![CDATA[Sun Jun  1 16:22:21 2025]]></Value>
       </MD>
       <MD>
          <Name><![CDATA[gifticlib-version]]></Name>
@@ -41,7 +41,7 @@
          </MD>
          <MD>
             <Name><![CDATA[TAG_CMDLINE#0]]></Name>
-            <Value><![CDATA[ProgramName: mris_inflate  ProgramArguments: mris_inflate -sulc surf_rh_sulcus.func.gii -rh /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh.surf.gii /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh_inflate.surf.gii  ProgramVersion: 8.0.0-beta  TimeStamp: 2025/04/07-22:04:57-GMT  BuildTime: Nov  3 2024 00:08:22  BuildStamp: freesurfer-linux-ubuntu22_x86_64-8.0.0-beta-20241102-b8aacdc  User: pabaua  Machine: montreal  Platform: Linux  PlatformVersion: 6.8.0-52-generic  CompilerName: GCC  CompilerVersion: 8.4.0]]></Value>
+            <Value><![CDATA[ProgramName: mris_inflate  ProgramArguments: mris_inflate -sulc sulcus.func.gii -mm -rh /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh.surf.gii /home/pabaua/dev_mni/neuroimaging_scripts/ieeg/surf_rh_inflate.surf.gii  ProgramVersion: 8.0.0-beta  TimeStamp: 2025/06/01-20:22:05-GMT  BuildTime: Nov  3 2024 00:08:22  BuildStamp: freesurfer-linux-ubuntu22_x86_64-8.0.0-beta-20241102-b8aacdc  User: pabaua  Machine: montreal  Platform: Linux  PlatformVersion: 6.8.0-58-generic  CompilerName: GCC  CompilerVersion: 8.4.0]]></Value>
          </MD>
       </MetaData>
       <CoordinateSystemTransformMatrix>
