@@ -284,13 +284,68 @@ def main():
     econ_ctb = econ_ctb[[0] + list(range(2, 45))]
     surf_type = relabel(econo_surf, econ_ctb)
     surf_type[surf_type == 0] = np.nan
-    surf_type[salience_border == 1] = 7
+    #surf_type[salience_border == 1] = 7
     print(np.unique(surf_type))
     plot_hemispheres(surf32k_lh, surf32k_rh, array_name=surf_type, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
                 nan_color=(220, 220, 220, 1), cmap='CustomCmap_type', transparent_bg=True)
     surf_type_lh = surf_type[:32492]
     surf_type_rh = surf_type[32492:]
 
+    #### tractogram
+    # load the conte69 hemisphere surfaces and spheres
+    from scipy.spatial import KDTree
+    fsLR_lh = nib.load('/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/surf/sub-mni_ses-01_hemi-L_space-nativepro_surf-fsLR-32k_label-white.surf.gii').darrays[0].data
+    fsLR_rh = nib.load('/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/surf/sub-mni_ses-01_hemi-R_space-nativepro_surf-fsLR-32k_label-white.surf.gii').darrays[0].data
+    coords = np.concatenate([fsLR_lh, fsLR_rh])
+    tree = KDTree(coords)
+
+    tractogram_f = nib.streamlines.load('/local_raid/data/pbautin/data/output_tractogram_with_dps.trk')
+    tractogram = tractogram_f.streamlines
+    endpoints = [(sl[0], sl[-1]) for sl in tractogram]
+
+    vertex_values = surf_type.copy()
+    vertex_values[np.isnan(salience)] = np.nan
+    streamline_values = []  # List to store values per streamline, e.g., tuple (start_val, end_val)
+    for start_pt, end_pt in endpoints:
+        dist_start, idx_start = tree.query(start_pt)
+        dist_end, idx_end = tree.query(end_pt)
+
+        # Optionally, define a cutoff distance to ensure endpoint is "close enough" to surface
+        # For example, if we only trust assignments when endpoint is within 2 mm of surface:
+        cutoff = 2.0
+        if dist_start <= cutoff:
+            start_val = vertex_values[idx_start]
+        else:
+            start_val = np.nan  # or some default value
+
+        if dist_end <= cutoff:
+            end_val = vertex_values[idx_end]
+        else:
+            end_val = np.nan
+
+        streamline_values.append(np.nanmax([start_val, end_val]))
+
+    num_streamlines = len(tractogram)
+    streamline_arr = np.zeros(num_streamlines)
+    streamline_values = np.asarray(streamline_values)
+    streamline_values[np.isnan(streamline_values)] = 0
+    streamline_arr = streamline_values
+    mask = (streamline_arr != 0)
+    streamline_arr = (streamline_arr - np.min(streamline_arr)) / (np.max(streamline_arr) - np.min(streamline_arr))
+    filtered_tractogram = [tractogram[i] for i in range(len(tractogram)) if mask[i]]
+    filtered_streamline_arr = streamline_arr[mask]
+    new_tractogram = nib.streamlines.Tractogram(filtered_tractogram, affine_to_rasmm=tractogram_f.tractogram.affine_to_rasmm)
+    #cmap = mp.colormaps['coolwarm']
+    color = (cmap_types(filtered_streamline_arr)[:, 0:3] * 255).astype(np.uint8)
+    print(color)
+    tmp = [np.tile(color[i], (len(new_tractogram.streamlines[i]), 1))
+           for i in range(len(new_tractogram.streamlines))]
+    new_tractogram.data_per_point['color'] = tmp
+    trk_file = nib.streamlines.TrkFile(new_tractogram)
+    trk_file.save('/local_raid/data/pbautin/data/output_tractogram_with_dps_2.trk')
+
+
+    ###### Cortical type comparisons
     # Define type labels
     type_labels = ['Kon', 'Eu-III', 'Eu-II', 'Eu-I', 'Dys', 'Ag', 'Other']
     label_map = dict(zip(range(1, 8), type_labels))
@@ -307,123 +362,138 @@ def main():
     surf_type[np.isnan(surf_type)] = 7  # Replace NaNs with dummy label
     state[np.isnan(state)] = np.where(state_name == 'medial_wall')[0][0]  # Replace NaNs with dummy label
 
-    # for net_idx, net_name in enumerate(state_name):
-    #     mask = (state == net_idx)
-    #     mask_lh, mask_rh = mask[:32492], mask[32492:]
+    for net_idx, net_name in enumerate(state_name):
+        mask = (state == net_idx)
+        mask_lh, mask_rh = mask[:32492], mask[32492:]
 
-    #     # Empirical
-    #     expected_types = np.arange(1, 8)  # Cortical types 1 to 7
-    #     comp = surf_type[mask] * mask[mask]
-    #     observed_types, counts = np.unique(comp, return_counts=True)
-    #     counts_dict = dict(zip(observed_types, counts))
-    #     full_counts = np.array([counts_dict.get(t, 0) for t in expected_types])
-    #     percentages = (full_counts / len(comp)) * 100
-    #     real_data[net_name] = dict(zip(expected_types, percentages))
+        # Empirical
+        expected_types = np.arange(1, 8)  # Cortical types 1 to 7
+        comp = surf_type[mask] * mask[mask]
+        observed_types, counts = np.unique(comp, return_counts=True)
+        counts_dict = dict(zip(observed_types, counts))
+        full_counts = np.array([counts_dict.get(t, 0) for t in expected_types])
+        percentages = (full_counts / len(comp)) * 100
+        real_data[net_name] = dict(zip(expected_types, percentages))
 
-    #     # comp = surf_type[mask] * mask[mask]
-    #     # u, c = np.unique(comp, return_counts=True)
-    #     # perc = (c / len(comp)) * 100
-    #     # real_data[net_name] = dict(zip(u, perc))
+        # comp = surf_type[mask] * mask[mask]
+        # u, c = np.unique(comp, return_counts=True)
+        # perc = (c / len(comp)) * 100
+        # real_data[net_name] = dict(zip(u, perc))
 
-    #     # Null distribution
-    #     net_rot = np.hstack(sp.randomize(mask_lh, mask_rh))
-    #     comp_dict = {val: [] for val in np.unique(surf_type)}
-    #     for n in range(n_rand):
-    #         comp = surf_type[net_rot[n]] * net_rot[n][net_rot[n]]
-    #         u, c = np.unique(comp, return_counts=True)
-    #         counts_dict = dict(zip(u, c))
-    #         full_counts = np.array([counts_dict.get(t, 0) for t in expected_types])
-    #         perc = (full_counts / len(comp)) * 100
-    #         for val in comp_dict:
-    #             comp_dict[val].append(dict(zip(expected_types, perc)).get(val, 0))
-    #     df = pd.DataFrame(comp_dict)
-    #     df.rename(columns={k: label_map.get(k, k) for k in df.columns}, inplace=True)
-    #     all_data[net_name] = df
+        # Null distribution
+        net_rot = np.hstack(sp.randomize(mask_lh, mask_rh))
+        comp_dict = {val: [] for val in np.unique(surf_type)}
+        for n in range(n_rand):
+            comp = surf_type[net_rot[n]] * net_rot[n][net_rot[n]]
+            u, c = np.unique(comp, return_counts=True)
+            counts_dict = dict(zip(u, c))
+            full_counts = np.array([counts_dict.get(t, 0) for t in expected_types])
+            perc = (full_counts / len(comp)) * 100
+            for val in comp_dict:
+                comp_dict[val].append(dict(zip(expected_types, perc)).get(val, 0))
+        df = pd.DataFrame(comp_dict)
+        df.rename(columns={k: label_map.get(k, k) for k in df.columns}, inplace=True)
+        all_data[net_name] = df
 
-    # # Plot results
-    # n_networks = len(all_data)
-    # n_cols = 4
-    # n_rows = int(np.ceil(n_networks / n_cols))
-    # fig, axs = plt.subplots(n_rows, n_cols, figsize=(12, 6))
-    # axs = axs.ravel()
+    # --- Plotting ---
 
-    # for i, (net_name, df) in enumerate(all_data.items()):
-    #     #sns.boxplot(data=df, ax=axs[i], color='lightgrey', fliersize=0)
-    #     sns.barplot(data=df, ax=axs[i], color='lightgrey')
-    #     rdict = {label_map.get(k, k): v for k, v in real_data[net_name].items()}
-    #     sns.scatterplot(x=list(rdict.keys()), y=list(rdict.values()), color=cmap_types_mw.colors, s=100, ax=axs[i])
-    #     axs[i].set_title(net_name)
-    #     #axs[i].set_ylabel('Percentage (%)')
-    #     axs[i].set_ylim(0, 60)
-    #     axs[i].tick_params(axis='x', labelrotation=90)
+    # Setup: Salience in full column
+    n_total = len(all_data)
+    n_cols = 4
+    sal_idx = np.where(state_name == "SalVentAttn")[0][0]
+    other_names = [n for i, n in enumerate(state_name)
+                if i != sal_idx and n != "medial_wall"]
+    n_rows = int(np.ceil(len(other_names) / (n_cols - 1)))
 
-    # # Hide unused subplots
-    # for j in range(i + 1, len(axs)):
-    #     axs[j].axis('off')
-    # plt.tight_layout()
-    # plt.show()
+    fig = plt.figure(figsize=(16, 8))
+    gs = fig.add_gridspec(n_rows, n_cols, wspace=0.4, hspace=0.6)
 
+    # Plot Salience in full column
+    ax_sal = fig.add_subplot(gs[:, 0])  # full height first column
+    df = all_data["SalVentAttn"]
+    sns.barplot(data=df, ax=ax_sal, color='lightgrey')
+    rdict = {label_map.get(k, k): v for k, v in real_data["SalVentAttn"].items()}
+    sns.scatterplot(x=list(rdict.keys()), y=list(rdict.values()), color=cmap_types_mw.colors, s=100, ax=ax_sal)
+    ax_sal.set_title("SalVentAttn")
+    ax_sal.set_ylim(0, 60)
+    ax_sal.tick_params(axis='x', labelrotation=90)
 
-    # ######### Part 2
-    # ### Load the data from the specified text file BigBrain
-    # data_bigbrain = np.loadtxt('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_den-32k_desc-profiles.txt', delimiter=',')
-    # salience = state.copy()
-    # salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
-    # salience_bigbrain = data_bigbrain[:,~np.isnan(salience)]
-    # mpc = build_mpc(salience_bigbrain)[0]
-    # mpc = np.triu(mpc,1)+mpc.T
-    # mpc[~np.isfinite(mpc)] = np.finfo(float).eps
-    # mpc[mpc==0] = np.finfo(float).eps
-    # gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
-    # gm.fit(mpc, sparsity=0)
+    # Plot other networks
+    for i, net_name in enumerate(other_names):
+        row, col = divmod(i, n_cols - 1)
+        ax = fig.add_subplot(gs[row, col + 1])
+        df = all_data[net_name]
+        sns.barplot(data=df, ax=ax, color='lightgrey')
+        rdict = {label_map.get(k, k): v for k, v in real_data[net_name].items()}
+        sns.scatterplot(x=list(rdict.keys()), y=list(rdict.values()), color=cmap_types_mw.colors, s=100, ax=ax)
+        ax.set_title(net_name)
+        ax.set_ylim(0, 60)
+        ax.tick_params(axis='x', labelrotation=90)
 
-    # n_plot = 30
-    # step = len(gm.gradients_[:, 0]) // n_plot
-    # sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
-    # sorted_gradient = gm.gradients_[:, 0][sorted_gradient_indx]
+    plt.tight_layout()
+    plt.show()
 
 
-    # # Plot
-    # from matplotlib.colors import Normalize
-    # from matplotlib.cm import get_cmap
-    # # Normalize gradient values for colormap mapping
-    # norm = Normalize(vmin=np.min(gm.gradients_[:, 0]), vmax=np.max(gm.gradients_[:, 0]))
-    # cmap = get_cmap('coolwarm')
-    # colors = [cmap(norm(g)) for g in sorted_gradient]
-    # plt.figure(figsize=(6, 10))
-    # for idx, color in zip(sorted_gradient_indx, colors):
-    #     plt.plot(salience_bigbrain[:, idx] / 10000, np.arange(salience_bigbrain.shape[0]), color=color, alpha=0.8, lw=3)
+    ######### Part 2
+    ### Load the data from the specified text file BigBrain
+    data_bigbrain = np.loadtxt('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_den-32k_desc-profiles.txt', delimiter=',')
+    salience = state.copy()
+    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
+    salience_bigbrain = data_bigbrain[:,~np.isnan(salience)]
+    mpc = build_mpc(salience_bigbrain)[0]
+    mpc = np.triu(mpc,1)+mpc.T
+    mpc[~np.isfinite(mpc)] = np.finfo(float).eps
+    mpc[mpc==0] = np.finfo(float).eps
+    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
+    gm.fit(mpc, sparsity=0)
 
-    # plt.xlabel("Cortical Depth (0 = WM, 1 = Pial)")
-    # plt.ylabel("T1 Map Intensity")
-    # plt.title("Cortical Depth Profiles Colored by Gradient (Pial on Top)")
-    # plt.gca().invert_yaxis()  # pial at top
-    # plt.grid(False)
+    n_plot = 30
+    step = len(gm.gradients_[:, 0]) // n_plot
+    sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
+    sorted_gradient = gm.gradients_[:, 0][sorted_gradient_indx]
 
-    # # Colorbar for gradient values
-    # sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    # sm.set_array([])
 
-    # plt.tight_layout()
-    # plt.show()
+    # Plot
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import get_cmap
+    # Normalize gradient values for colormap mapping
+    norm = Normalize(vmin=np.min(gm.gradients_[:, 0]), vmax=np.max(gm.gradients_[:, 0]))
+    cmap = get_cmap('coolwarm')
+    colors = [cmap(norm(g)) for g in sorted_gradient]
+    plt.figure(figsize=(6, 10))
+    for idx, color in zip(sorted_gradient_indx, colors):
+        plt.plot(salience_bigbrain[:, idx] / 10000, np.arange(salience_bigbrain.shape[0]), color=color, alpha=0.8, lw=3)
 
-    # print(gm.lambdas_)
-    # arr = np.zeros(64984)
-    # arr[arr == 0] = np.nan
-    # arr[~np.isnan(salience)] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
-    # plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-    #                          nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
-    # plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-    #                         nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+    plt.xlabel("Cortical Depth (0 = WM, 1 = Pial)")
+    plt.ylabel("T1 Map Intensity")
+    plt.title("Cortical Depth Profiles Colored by Gradient (Pial on Top)")
+    plt.gca().invert_yaxis()  # pial at top
+    plt.grid(False)
 
-    # arr[~np.isnan(salience)] = (gm.gradients_[:, 1] - np.min(gm.gradients_[:, 1])) / (np.max(gm.gradients_[:, 1]) - np.min(gm.gradients_[:, 1]))
-    # plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-    #                          nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
-    # plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-    #                         nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+    # Colorbar for gradient values
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    plt.tight_layout()
+    plt.show()
+
+    print(gm.lambdas_)
+    arr = np.zeros(64984)
+    arr[arr == 0] = np.nan
+    arr[~np.isnan(salience)] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+
+    arr[~np.isnan(salience)] = (gm.gradients_[:, 1] - np.min(gm.gradients_[:, 1])) / (np.max(gm.gradients_[:, 1]) - np.min(gm.gradients_[:, 1]))
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
     
     #### Load the data from the specified text file T1 map
-     #### 7T network gradient
+    #### 7T network gradient
     # load yeo atlas 7 network
     atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_lh.label.gii').darrays[0].data + 1000
     atlas_yeo_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_rh.label.gii').darrays[0].data + 1800
