@@ -1,5 +1,8 @@
-#!/usr/bin/env python
-#
+from __future__ import division
+
+# !/usr/bin/env python
+# -*- coding: utf-8
+#########################################################################################
 # Compute MT saturation map and T1 map from a PD-weighted, a T1-weighted, and MT-weighted FLASH images
 #
 # Reference paper:
@@ -7,7 +10,20 @@
 #    for RF inhomogeneity and T1 relaxation obtained from 3D FLASH MRI. Magn Reson Med 2008;60(6):1396-1407.
 #
 # This code is modified to remove dependencies on the Spinal Cord Toolbox (SCT).
-# Original SCT code: https://github.com/neuropoly/spinalcordtoolbox
+# Original SCT code: https://github.com/neuropoly/
+#
+# example: 
+# python /local_raid/data/pbautin/software/neuroimaging_scripts/qmri/mica_mtsat.py \
+#   -mt /data/mica/mica3/BIDS_PNI/rawdata/sub-PNC026/ses-a2/anat/sub-PNC026_ses-a2_acq-mtw_mt-on_MTR.nii.gz \
+#   -pd /data/mica/mica3/BIDS_PNI/rawdata/sub-PNC026/ses-a2/anat/sub-PNC026_ses-a2_acq-mtw_mt-off_MTR.nii.gz \
+#   -t1 /data/mica/mica3/BIDS_PNI/rawdata/sub-PNC026/ses-a2/anat/sub-PNC026_ses-a2_acq-mtw_T1w.nii.gz \
+#   -omtsat /local_raid/data/pbautin/results/qmri/MTsat.nii \
+#   -ot1map /local_raid/data/pbautin/results/qmri/T1map.nii \
+#   -omtr /local_raid/data/pbautin/results/qmri/MTr.nii
+#
+# For some cases:
+#   -b1map /local_raid/data/pbautin/results/qmri/sub-PNC026_ses-a2_acq-sfam_TB1TFL_B1map.nii \
+#########################################################################################
 
 import sys
 import os
@@ -184,28 +200,27 @@ def divide_after_removing_zero(dividend, divisor, threshold, replacement=np.nan)
     return result_full
 
 
-def compute_mtr(nii_mt1, nii_mt0, threshold_mtr=100):
+def compute_mtr(nii_mt_off, nii_mt_on, threshold_mtr=100):
     """
     Compute Magnetization Transfer Ratio in percentage.
 
-    :param nii_mt1: Image object without MT pulse (MT0)
-    :param nii_mt0: Image object with MT pulse (MT1)
+    :param nii_mt_off: Image object without MT pulse (MT0)
+    :param nii_mt_on: Image object with MT pulse (MT1)
     :param threshold_mtr: float: value above which number will be clipped
     :return: nii_mtr
     """
     # Convert input to avoid numerical errors from int16 data
     # Related issue: https://github.com/spinalcordtoolbox/spinalcordtoolbox/issues/3636
-
-    nii_mt1_img = nii_mt1
-    nii_mt1 = nii_mt1.get_fdata().astype(np.float64)
-    nii_mt0 = nii_mt0.get_fdata().astype(np.float64)
+    nii_mt_on_img = nii_mt_on
+    nii_mt_on = nii_mt_on.get_fdata().astype(np.float64)
+    nii_mt_off = nii_mt_off.get_fdata().astype(np.float64)
 
     # Initialize Image object
-    nii_mtr = nii_mt1.copy()
+    nii_mtr = nii_mt_on.copy()
 
     # Compute MTR
-    nii_mtr = divide_after_removing_zero(100 * (nii_mt0 - nii_mt1), nii_mt0, threshold_mtr)
-    nii_mtr = nib.Nifti1Image(nii_mtr, nii_mt1_img.affine, nii_mt1_img.header)
+    nii_mtr = divide_after_removing_zero(100 * (nii_mt_off - nii_mt_on), nii_mt_off, threshold_mtr)
+    nii_mtr = nib.Nifti1Image(nii_mtr, nii_mt_on_img.affine, nii_mt_on_img.header)
     return nii_mtr
 
 
@@ -277,7 +292,7 @@ def compute_mtsat(nii_mt, nii_pd, nii_t1,
         logger.info("Use input T1 map.")
         r1map = 1. / nii_t1map
 
-    # Compute A
+    # Compute A to compute MT-sat
     logger.info("Compute A...")
     a = (tr_pd * fa_t1_rad / fa_pd_rad - tr_t1 * fa_pd_rad / fa_t1_rad) * \
         np.true_divide(np.multiply(nii_pd, nii_t1, dtype=float),
@@ -401,8 +416,6 @@ def main(argv: Sequence[str]):
     logger.info(f"MTR map saved to {arguments.omtr}")
     logger.info(f"T1 map saved to {arguments.ot1map}")
 
+
 if __name__ == "__main__":
     main(sys.argv[1:])
-
-
-# python /local_raid/data/pbautin/software/neuroimaging_scripts/qmri/run_mp2rage.py -mt /local_raid/data/pbautin/data/pilot_dataset/sub-Pilot014/ses-02/anat/sub-Pilot014_ses-02_mt-on_MTR.nii.gz -pd /local_raid/data/pbautin/data/pilot_dataset/sub-Pilot014/ses-02/anat/sub-Pilot014_ses-02_mt-off_MTR.nii.gz -t1 /local_raid/data/pbautin/data/pilot_dataset/sub-Pilot014/ses-02/anat/sub-Pilot014_ses-02_acq-T1_0p5-T1map.nii.gz

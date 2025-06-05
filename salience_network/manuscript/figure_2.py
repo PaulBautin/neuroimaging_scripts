@@ -4,7 +4,7 @@ from __future__ import division
 # -*- coding: utf-8
 #########################################################################################
 #
-# Cytoarchitecture of the salience network
+# Dynamics of the salience network
 #
 # example:
 # ---------------------------------------------------------------------------------------
@@ -25,7 +25,7 @@ from os.path import dirname as up
 import nibabel as nib
 from nilearn import plotting, datasets
 import pandas as pd
-from brainspace.plotting import plot_hemispheres
+from brainspace.plotting import plot_hemispheres, plot_surf
 from brainspace.mesh.mesh_io import read_surface
 from brainspace.mesh import array_operations
 from brainspace.datasets import load_conte69
@@ -48,6 +48,9 @@ from scipy.spatial import cKDTree
 from brainspace.vtk_interface import wrap_vtk
 from brainspace.plotting.base import Plotter
 from vtkmodules.vtkFiltersSources import vtkSphereSource
+
+from scipy.signal import welch
+import pycatch22 as catch22
 
 
 #### set custom plotting parameters
@@ -103,6 +106,110 @@ cmap_types_rgba_mw = np.hstack((cmap_types_rgb_mw, alpha))
 cmap_types_mw = mp.colors.ListedColormap(cmap_types_rgba_mw)
 
 
+def build_mpc(data, parc=None, idxExclude=None):
+    # If no parcellation is provided, MPC will be computed vertexwise
+    if parc is None:
+        downsample = 0
+    else:
+        downsample = 1
+
+
+    # Parcellate input data according to parcellation scheme provided by user
+    if downsample == 1:
+        uparcel = np.unique(parc)
+        I = np.zeros([data.shape[0], len(uparcel)])
+
+        # Parcellate data by averaging profiles within nodes
+        for (ii, _) in enumerate(uparcel):
+
+            # Get vertices within parcel
+            thisparcel = uparcel[ii]
+            tmpData = data[:, parc == thisparcel]
+            tmpData[:,np.mean(tmpData) == 0] = 0
+
+            # Define function to find outliers: Return index of values above three scaled median absolute deviations of input data
+            # https://www.mathworks.com/help/matlab/ref/isoutlier.html
+            def find_outliers(data_vector):
+                c = -1 / (np.sqrt(2) * scipy.special.erfcinv(3/2))
+                scaled_MAD = c * np.median(np.abs(data_vector - np.median(data_vector)))
+                is_outlier = np.greater(data_vector, (3 * scaled_MAD) + np.median(data_vector))
+                idx_outlier = [i for i, x in enumerate(is_outlier) if x]
+                return idx_outlier
+
+            # Find if there are any outliers in vertex-wise average profile within given parcel
+            idx = find_outliers(np.mean(tmpData, axis = 0))
+            if len(idx) > 0:
+                tmpData[:,idx] = np.nan
+
+            # Average profiles within parcels
+            I[:,ii] = np.nanmean(tmpData, axis = 1)
+
+        # Get matrix sizes
+        szI = I.shape
+        szZ = [len(uparcel), len(uparcel)]
+
+    else:
+        I = data
+        szI = data.shape
+        szZ = np.empty((data.shape[1], data.shape[1]))
+
+
+    # Build MPC
+    if np.isnan(np.sum(I)):
+
+        # Find where are the NaNs
+        is_nan = np.isnan(I[1,:])
+        problemNodes = [i for i, x in enumerate(is_nan) if x]
+        print("")
+        print("---------------------------------------------------------------------------------")
+        print("There seems to be an issue with the input data or parcellation. MPC will be NaNs!")
+        print("---------------------------------------------------------------------------------")
+        print("")
+
+        # Fill matrices with NaN for return
+        I = np.zeros(szI)
+        I[I == 0] = np.nan
+        MPC = np.zeros(szZ)
+        MPC[MPC == 0] = np.nan
+
+    else:
+        problemNodes = 0
+
+        # Calculate mean across columns, excluding mask and any excluded labels input
+        I_mask = I
+        NoneType = type(None)
+        if type(idxExclude) != NoneType:
+            for i in idxExclude:
+                I_mask[:, i] = np.nan
+        I_M = np.nanmean(I_mask, axis = 1)
+
+        # Get residuals of all columns (controlling for mean)
+        I_resid = np.zeros(I.shape)
+        for c in range(I.shape[1]):
+            y = I[:,c]
+            x = I_M
+            slope, intercept, _, _, _ = scipy.stats.linregress(x,y)
+            y_pred = intercept + slope*x
+            I_resid[:,c] = y - y_pred
+
+        R = np.corrcoef(I_resid, rowvar=False)
+
+        # Log transform
+        MPC = 0.5 * np.log( np.divide(1 + R, 1 - R) )
+        MPC[np.isnan(MPC)] = 0
+        MPC[np.isinf(MPC)] = 0
+
+        # CLEANUP: correct diagonal and round values to reduce file size
+        # Replace all values in diagonal by zeros to account for floating point error
+        for i in range(0,MPC.shape[0]):
+                MPC[i,i] = 0
+        # Replace lower triangle by zeros
+        MPC = np.triu(MPC)
+
+    # Output MPC, microstructural profiles, and problem nodes
+    return (MPC, I, problemNodes)
+
+
 def convert_states_str2int(states_str):
     """This function takes a list of strings that designate a distinct set of binary brain states and returns
     a numpy array of integers encoding those states alongside a list of keys for those integers.
@@ -137,6 +244,130 @@ def surf_type_isolation(surf_type_test, i):
     return surf_type_copy
 
 
+def plot_surface_nodes(surf, data):
+    # Create custom colormap
+    colors = ['darkgray', 'purple', 'orange', 'red', 'blue']  # Index 0 is white
+    custom_cmap = mp.colors.ListedColormap(colors)
+    norm = mp.colors.Normalize(vmin=0, vmax=4)  # Normalize integers from 0–4
+
+    channel_type_raw = data['ChannelType']
+    channel_type_flat = [item[0][0] for item in channel_type_raw]
+    channel_type_mapping_int = {
+        'D': 1,  # Dixi intracerebral electrodes
+        'M': 2,  # Homemade MNI intracerebral electrodes
+        'A': 3,  # AdTech intracerebral electrodes
+        'G': 4   # AdTech subdural strips and grids
+    }
+    channel_integers = np.array([channel_type_mapping_int.get(ct, 0) for ct in channel_type_flat])
+
+    ##### Plotting #####
+    p = Plotter(nrow=1, ncol=2, size=(1600, 800))
+    ren = p.AddRenderer(row=0, col=0, background=(1, 1, 1))
+    # Add brain surface
+    actor_surf = ren.AddActor()
+    mapper_surf = actor_surf.SetMapper()
+    mapper_surf.SetInputData(surf)
+    actor_surf.GetProperty().SetColor(0.85,0.85,0.85)
+    actor_surf.GetProperty().SetOpacity(1)
+    # Add colored spheres
+    for i, pos in enumerate(data['ChannelPosition']):
+        val = channel_integers[i]
+        rgba = custom_cmap(norm(val))
+        rgb = rgba[:3]
+        sphere = vtkSphereSource()
+        sphere.SetCenter(*pos)
+        sphere.SetRadius(1.5)
+        sphere.Update()
+        actor = ren.AddActor()
+        mapper = actor.SetMapper()
+        mapper.SetInputData(sphere.GetOutput())
+        actor.GetProperty().SetColor(*rgb)
+        actor.GetProperty().SetOpacity(1.0)
+    # Camera setup
+    camera = ren.GetActiveCamera()
+    camera.Azimuth(-90)
+    camera.Elevation(0)
+    camera.Roll(90)
+    camera.Dolly(0.002 *  1.2)
+    ren.ResetCameraClippingRange()
+
+    ren = p.AddRenderer(row=0, col=1, background=(1, 1, 1))
+    # Add brain surface
+    actor_surf = ren.AddActor()
+    mapper_surf = actor_surf.SetMapper()
+    mapper_surf.SetInputData(surf)
+    actor_surf.GetProperty().SetColor(0.85,0.85,0.85)
+    actor_surf.GetProperty().SetOpacity(1)
+    # Add colored spheres
+    for i, pos in enumerate(data['ChannelPosition']):
+        val = channel_integers[i]
+        rgba = custom_cmap(norm(val))
+        rgb = rgba[:3]
+        sphere = vtkSphereSource()
+        sphere.SetCenter(*pos)
+        sphere.SetRadius(1.5)
+        sphere.Update()
+        actor = ren.AddActor()
+        mapper = actor.SetMapper()
+        mapper.SetInputData(sphere.GetOutput())
+        actor.GetProperty().SetColor(*rgb)
+        actor.GetProperty().SetOpacity(1.0)
+    # Camera setup
+    camera = ren.GetActiveCamera()
+    camera.Azimuth(90)
+    camera.Elevation(0)
+    camera.Roll(-90)
+    camera.Dolly(0.002 * 1.2)
+    ren.ResetCameraClippingRange()
+    p.show()
+
+def smooth_euclidean(plot_values, vertices, radius=10.0, sigma=3.0):
+    tree = cKDTree(vertices)
+    smoothed = np.zeros_like(plot_values)
+
+    for i, vtx in enumerate(vertices):
+        neighbor_ids = tree.query_ball_point(vtx, r=radius)
+        if len(neighbor_ids) == 0:
+            continue
+        distances = np.linalg.norm(vertices[neighbor_ids] - vtx, axis=1)
+        weights = np.exp(-distances**2 / (2 * sigma**2))
+        values = plot_values[neighbor_ids]
+        smoothed[i] = np.average(values, weights=weights)
+
+    return smoothed
+
+def compute_psd(fs, data_w):
+    """
+    Compute the Power Spectral Density (PSD) for each channel.
+
+    Parameters:
+    - fs: int
+        Sampling frequency (Hz).
+    - data_w: np.ndarray
+        Time-series data for each channel (channels x samples).
+
+    Returns:
+    - pxx_log: np.ndarray
+        Log-transformed, normalized PSD matrix (frequencies x channels).
+    """
+    # Compute the PSD for frequencies between 0.5 and 80 Hz
+    f, pxx = welch(data_w, fs=fs)
+    # freq_mask = (f >= 0.5) & (f <= 80)
+    # f = f[freq_mask]
+    # pxx = pxx[:, freq_mask]
+    # Normalize PSD to total power = 1
+    pxx = pxx / np.sum(pxx, axis=1, keepdims=True)
+    # Log-transform and normalize the PSD
+    pxx_log = np.log(pxx)
+    return f, pxx_log
+
+# Compute the catch22 features
+def compute_features(x):
+    res = catch22.catch22_all(x, catch24 = True)
+    return res['values'] # just return the values 
+
+
+
 def main():
     #### load the conte69 hemisphere surfaces and spheres
     surf_32k = load_conte69(join=True)
@@ -146,10 +377,10 @@ def main():
     surf5k_lh = read_surface(micapipe + '/surfaces/fsLR-5k.L.inflated.surf.gii', itype='gii')
     surf5k_rh = read_surface(micapipe + '/surfaces/fsLR-5k.R.inflated.surf.gii', itype='gii')
     # Load fsLR-5k inflated surface
-    micapipe='/local_raid/data/pbautin/software/micapipe'
     surf32k_lh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.L.inflated.surf.gii', itype='gii')
     surf32k_rh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.R.inflated.surf.gii', itype='gii')
-    surf32k_lh, surf32k_rh = load_conte69(join=False)
+    surf32k_lh = read_surface(micapipe + '/surfaces/fsLR-32k.L.midthickness.surf.gii', itype='gii')
+    surf32k_rh = read_surface(micapipe + '/surfaces/fsLR-32k.R.midthickness.surf.gii', itype='gii')
 
 
     #### load yeo atlas 7 network
@@ -193,23 +424,6 @@ def main():
 
 
     
-    #### Load the data from the specified text file T1 map
-     #### 7T network gradient
-    # load yeo atlas 7 network
-    atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_lh.label.gii').darrays[0].data + 1000
-    atlas_yeo_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_rh.label.gii').darrays[0].data + 1800
-    atlas_yeo_rh[atlas_yeo_rh == 1800] = 2000
-    yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
-    df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
-
-    # load .csv associated with schaefer 400
-    df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
-    df_label['network'] = df_label['label'].str.extract(r'(Vis|Default|Cont|DorsAttn|Limbic|SalVentAttn|SomMot|medial_wall)')
-    df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
-    state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
-    state[state == np.where(state_name == 'medial_wall')[0]] = np.nan
-    salience = state.copy()
-    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
 
 
 
@@ -241,169 +455,381 @@ def main():
     mesh.mesh_io.write_surface(surf_lh, '/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/surf_lh_ieeg_atlas.surf.gii')
     mesh.mesh_io.write_surface(surf_rh, '/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/surf_rh_ieeg_atlas.surf.gii')
 
-    sphere_lh = read_surface('/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/L.sphere.reg.surf.gii', itype='gii')
-    sphere_rh = read_surface('/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/R.sphere.reg.surf.gii', itype='gii')
-
-
+    ## electrode projection on cortical surface
+    data['ChannelPosition'][:,0] = np.abs(data['ChannelPosition'][:,0])
+    #plot_surface_nodes(surf_rh, data)
     vertices = np.vstack((data['NodesLeft'], data['NodesRight']))
     tree = cKDTree(vertices)
-    for i, channel_pos in enumerate(data['ChannelPosition']):
-        distance, index = tree.query(channel_pos, k=1)  # Get index of closest vertex
-        data['ChannelPosition'][i] = vertices[index]
-
-    ##### Plotting #####
-    p = Plotter(nrow=1, ncol=2, size=(1600, 800))
-    ren = p.AddRenderer(row=0, col=0, background=(1, 1, 1))
-    # Add brain surface
-    actor_surf = ren.AddActor()
-    mapper_surf = actor_surf.SetMapper()
-    mapper_surf.SetInputData(surf_rh)
-    actor_surf.GetProperty().SetColor(0.85,0.85,0.85)
-    actor_surf.GetProperty().SetOpacity(1)
-    # Add colored spheres
-    for i, pos in enumerate(data['ChannelPosition']):
-        val = channel_integers[i]
-        rgba = custom_cmap(norm(val))
-        rgb = rgba[:3]
-        sphere = vtkSphereSource()
-        sphere.SetCenter(*pos)
-        sphere.SetRadius(1.5)
-        sphere.Update()
-        actor = ren.AddActor()
-        mapper = actor.SetMapper()
-        mapper.SetInputData(sphere.GetOutput())
-        actor.GetProperty().SetColor(*rgb)
-        actor.GetProperty().SetOpacity(1.0)
-    # Camera setup
-    camera = ren.GetActiveCamera()
-    camera.Azimuth(-90)
-    camera.Elevation(0)
-    camera.Roll(90)
-    camera.Dolly(0.002 *  1.2)
-    ren.ResetCameraClippingRange()
-
-    ren = p.AddRenderer(row=0, col=1, background=(1, 1, 1))
-    # Add brain surface
-    actor_surf = ren.AddActor()
-    mapper_surf = actor_surf.SetMapper()
-    mapper_surf.SetInputData(surf_rh)
-    actor_surf.GetProperty().SetColor(0.85,0.85,0.85)
-    actor_surf.GetProperty().SetOpacity(1)
-    # Add colored spheres
-    for i, pos in enumerate(data['ChannelPosition']):
-        val = channel_integers[i]
-        rgba = custom_cmap(norm(val))
-        rgb = rgba[:3]
-        sphere = vtkSphereSource()
-        sphere.SetCenter(*pos)
-        sphere.SetRadius(1.5)
-        sphere.Update()
-        actor = ren.AddActor()
-        mapper = actor.SetMapper()
-        mapper.SetInputData(sphere.GetOutput())
-        actor.GetProperty().SetColor(*rgb)
-        actor.GetProperty().SetOpacity(1.0)
-    # Camera setup
-    camera = ren.GetActiveCamera()
-    camera.Azimuth(90)
-    camera.Elevation(0)
-    camera.Roll(-90)
-    camera.Dolly(0.002 * 1.2)
-    ren.ResetCameraClippingRange()
-    p.show()
+    indices_surf = tree.query(data['ChannelPosition'])[1]
+    data['ChannelPosition'] = vertices[indices_surf]
+    #plot_surface_nodes(surf_rh, data)
    
+    ## electrode projection on registered (to template) cortical surface
+    surf_reg_lh = read_surface('/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/L.anat.reg.surf.gii', itype='gii')
+    surf_reg_rh = read_surface('/local_raid/data/pbautin/software/neuroimaging_scripts/ieeg/R.anat.reg.surf.gii', itype='gii')
+    vertices_surf_reg = np.vstack((surf_reg_lh.GetPoints(), surf_reg_rh.GetPoints()))
+    data['ChannelPosition'] = vertices_surf_reg[indices_surf]
+    #plot_surface_nodes(surf_reg_rh, data)
 
-    ##### surface data #####
-    vertices = np.vstack((data['NodesLeft'], data['NodesRight']))
-    vertices_sphere = np.vstack((sphere_lh.GetPoints(), sphere_rh.GetPoints()))
-    tree = cKDTree(vertices)
-    plot_values = np.zeros(vertices.shape[0])
-    for i, channel_pos in enumerate(data['ChannelPosition']):
-        distance, index = tree.query(channel_pos, k=1)  # Get index of closest vertex
-        data['ChannelPosition'][i] = vertices_sphere[index]
-        #plot_values[index] = 10
-    #data['ChannelPosition'][:,0] = np.abs(data['ChannelPosition'][:,0])
-
-
-    vertices_sphere_32k = np.vstack((sphere32k_lh.GetPoints(), sphere32k_rh.GetPoints()))
+    ## electrode projection on template cortical surface
+    vertices_32k = np.vstack((surf32k_lh.GetPoints(), surf32k_rh.GetPoints()))
     vertices_32k_infl = np.vstack((surf32k_lh_infl.GetPoints(), surf32k_rh_infl.GetPoints()))
-    tree = cKDTree(vertices_sphere_32k)
-    plot_values = np.zeros(vertices_32k_infl.shape[0])
-    for i, channel_pos in enumerate(data['ChannelPosition']):
-        distance, index = tree.query(channel_pos, k=1)  # Get index of closest vertex
-        data['ChannelPosition'][i] = vertices_32k_infl[index]
-        #data['ChannelPosition'][i,0] = np.abs(data['ChannelPosition'][i,0])
-        #plot_values[index] = 10
-    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=plot_values, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-    # nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True)
+    tree = cKDTree(vertices_32k)
+    indices_32k = tree.query(data['ChannelPosition'])[1]
+    data['ChannelPosition'] = vertices_32k_infl[indices_32k]
+    salience_mask = salience[indices_32k] != 0
+    indices_32k_salience = indices_32k[salience_mask]
+    #data['ChannelPosition'] = data['ChannelPosition'][salience_mask,:]
+    print(data['ChannelPosition'].shape)
+    #plot_surface_nodes(surf32k_rh_infl, data)
 
 
-    ##### Plotting #####
-    p = Plotter(nrow=1, ncol=2, size=(1600, 800))
-    ren = p.AddRenderer(row=0, col=0, background=(1, 1, 1))
-    # Add brain surface
-    actor_surf = ren.AddActor()
-    mapper_surf = actor_surf.SetMapper()
-    mapper_surf.SetInputData(surf32k_rh_infl)
-    actor_surf.GetProperty().SetColor(0.85,0.85,0.85)
-    actor_surf.GetProperty().SetOpacity(1)
-    # Add colored spheres
-    for i, pos in enumerate(data['ChannelPosition']):
-        val = channel_integers[i]
-        rgba = custom_cmap(norm(val))
-        rgb = rgba[:3]
-        sphere = vtkSphereSource()
-        sphere.SetCenter(*pos)
-        sphere.SetRadius(1.5)
-        sphere.Update()
-        actor = ren.AddActor()
-        mapper = actor.SetMapper()
-        mapper.SetInputData(sphere.GetOutput())
-        actor.GetProperty().SetColor(*rgb)
-        actor.GetProperty().SetOpacity(1.0)
-    # Camera setup
-    camera = ren.GetActiveCamera()
-    camera.Azimuth(-90)
-    camera.Elevation(0)
-    camera.Roll(90)
-    camera.Dolly(0.002 *  1.2)
-    ren.ResetCameraClippingRange()
+    # --- Distance-weighted smoothing ---
+    FREQ_BANDS = {
+    'delta': (0.5, 4),
+    'theta': (4, 8),
+    'alpha': (8, 13),
+    'beta':  (13, 30),
+    'gamma': (30, 80)}
 
-    ren = p.AddRenderer(row=0, col=1, background=(1, 1, 1))
-    # Add brain surface
-    actor_surf = ren.AddActor()
-    mapper_surf = actor_surf.SetMapper()
-    mapper_surf.SetInputData(surf32k_rh_infl)
-    actor_surf.GetProperty().SetColor(0.85,0.85,0.85)
-    actor_surf.GetProperty().SetOpacity(1)
-    # Add colored spheres
-    for i, pos in enumerate(data['ChannelPosition']):
-        val = channel_integers[i]
-        rgba = custom_cmap(norm(val))
-        rgb = rgba[:3]
-        sphere = vtkSphereSource()
-        sphere.SetCenter(*pos)
-        sphere.SetRadius(1.5)
-        sphere.Update()
-        actor = ren.AddActor()
-        mapper = actor.SetMapper()
-        mapper.SetInputData(sphere.GetOutput())
-        actor.GetProperty().SetColor(*rgb)
-        actor.GetProperty().SetOpacity(1.0)
-    # Camera setup
-    camera = ren.GetActiveCamera()
-    camera.Azimuth(90)
-    camera.Elevation(0)
-    camera.Roll(-90)
-    camera.Dolly(0.002 * 1.2)
-    #ren.ResetCameraClippingRange()
+    def extract_band_power(pxx_log: np.ndarray, freq: np.ndarray, band: tuple) -> np.ndarray:
+        """Compute z-scored power for a given frequency band."""
+        band_idx = np.where((freq >= band[0]) & (freq < band[1]))[0]
+        band_power = np.mean(pxx_log[:, band_idx], axis=1)
+        zscore = (band_power - np.mean(band_power)) / np.std(band_power)
+        return zscore
+    
+    f, pxx_log = compute_psd(data['SamplingFrequency'], data_w)
+    freq = f[0, :]
+    
+    band_maps = {}
+    for band_name, band_range in FREQ_BANDS.items():
+        zscore = extract_band_power(pxx_log, freq, band_range)
+        plot_values = np.zeros(vertices_32k_infl.shape[0])
+        plot_values[indices_32k] = zscore
+        smoothed = smooth_euclidean(plot_values, vertices_32k_infl, radius=10.0, sigma=3.0)
+        smoothed[:32492] = smoothed[32492:]
+        band_maps[band_name] = smoothed / np.max(smoothed)
+
+    # Stack all frequency band maps: shape (vertices, n_bands)
+    type_labels = ['delta', 'theta', 'alpha', 'beta', 'gamma']
+    band_array = np.stack([band_maps[band] for band in type_labels], axis=1)  # normalized maps
+
+    # Prepare spin permutations
+    n_rand = 100
+    sp = SpinPermutations(n_rep=n_rand, random_state=0)
+    sphere_lh, sphere_rh = load_conte69(as_sphere=True)
+    sp.fit(sphere_lh, points_rh=sphere_rh)
+    # Initialize result containers
+    real_data = {}
+    all_data = {}
+    # Iterate over each network
+    for net_idx, net_name in enumerate(state_name):
+        if net_name == 'medial_wall':
+            continue
+        mask = (state == net_idx)
+        mask_lh, mask_rh = mask[:32492], mask[32492:]
+        # Real (empirical) composition: mean normalized power per band
+        band_means = np.mean(band_array[mask], axis=0)
+        #percentages = (band_means / np.sum(band_means)) * 100
+        percentages = band_means
+        real_data[net_name] = dict(zip(type_labels, percentages))
+
+        # Null distribution via spin permutation
+        comp_dict = {band: [] for band in type_labels}
+        net_rot = np.hstack(sp.randomize(mask_lh, mask_rh))
+        for n in range(n_rand):
+            rotated_mask = net_rot[n].astype(bool)
+            band_means = np.mean(band_array[rotated_mask], axis=0)
+            #percentages = (band_means / np.sum(band_means)) * 100
+            percentages = band_means
+            for i, band in enumerate(type_labels):
+                comp_dict[band].append(percentages[i])
+
+        # Store as dataframe
+        all_data[net_name] = pd.DataFrame(comp_dict)
+    print(all_data)
+
+    # Optional: define band order and colors
+    band_order = ['delta', 'theta', 'alpha', 'beta', 'gamma']
+    # cmap_types_mw.colors should contain 5 colors in order of band_order
+    band_colors = ['#1f77b4', '#9467bd', '#e377c2', '#2ca02c', '#17becf']
+
+    # --- Plotting ---
+    n_total = len(all_data)
+    n_cols = 4
+
+    # Get index and names
+    sal_idx = np.where(state_name == "SalVentAttn")[0][0]
+    other_names = [n for i, n in enumerate(state_name)
+                if i != sal_idx and n != "medial_wall"]
+    n_rows = int(np.ceil(len(other_names) / (n_cols - 1)))
+
+    fig = plt.figure(figsize=(16, 8))
+    gs = fig.add_gridspec(n_rows, n_cols, wspace=0.4, hspace=0.6)
+
+    # --- Plot Salience in full first column ---
+    ax_sal = fig.add_subplot(gs[:, 0])
+    df = all_data["SalVentAttn"]
+    df_melt = df[band_order].melt(var_name='Band', value_name='Average z-score')
+
+    sns.barplot(data=df_melt, x='Band', y='Average z-score', ax=ax_sal, color='lightgrey')
+    real_vals = [real_data["SalVentAttn"][band] for band in band_order]
+    sns.scatterplot(x=band_order, y=real_vals, color=band_colors, s=100, ax=ax_sal)
+
+    ax_sal.set_title("SalVentAttn")
+    ax_sal.set_ylim(-0.2, 0.2)
+    ax_sal.tick_params(axis='x', labelrotation=90)
+
+    # --- Plot all other networks ---
+    for i, net_name in enumerate(other_names):
+        row, col = divmod(i, n_cols - 1)
+        ax = fig.add_subplot(gs[row, col + 1])
+        df = all_data[net_name]
+        df_melt = df[band_order].melt(var_name='Band', value_name='Average z-score')
+
+        sns.barplot(data=df_melt, x='Band', y='Average z-score', ax=ax, color='lightgrey')
+        real_vals = [real_data[net_name][band] for band in band_order]
+        sns.scatterplot(x=band_order, y=real_vals, color=band_colors, s=100, ax=ax)
+
+        ax.set_title(net_name)
+        ax.set_ylim(-0.2, 0.2)
+        ax.tick_params(axis='x', labelrotation=90)
+
+    plt.tight_layout()
+    plt.show()
+
+    surf32k_rh_infl.append_array(band_maps['delta'][32492:], name="overlay2")
+    surfs = {'rh1': surf32k_rh_infl, 'rh2': surf32k_rh_infl}
+    layout = [['rh1', 'rh2']]
+    view = [['lateral', 'medial']]
+
+    p = plot_surf(surfs, layout=layout, view=view, array_name="overlay2", size=(1200, 600), zoom=1.3, color_bar='bottom', share='both',
+        nan_color=(0, 0, 0, 1), cmap="coolwarm", color_range='sym', transparent_bg=True, return_plotter=True)
     p.show()
 
-    output_txt = "/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/electrodes_foci.txt"
-    with open(output_txt, "w") as f:
-        for name, color, coord in zip(channel_name, custom_cmap(norm(channel_integers)) * 255, data['ChannelPosition']):
-            f.write(f"{name}\n")
-            f.write(f"{color[0]:.0f} {color[1]:.0f} {color[2]:.0f} {coord[0]:.3f} {coord[1]:.3f} {coord[2]:.3f}\n")
+
+    plt.plot(freq, pxx_log[89, :], color='blue')
+    plt.xlabel('Frequency (Hz)')
+    plt.ylabel('Log(Normalized PSD)')
+    plt.title('Power Spectral Density')
+    plt.axvline(x=0.5, color='grey', linestyle='--', label='δ (0.5-4Hz)',alpha=0.5)
+    plt.axvline(x=4, color='grey', linestyle='--',alpha=0.5)
+    plt.axvline(x=8, color='grey', linestyle='--', label='θ (4-8Hz)',alpha=0.5)
+    plt.axvline(x=13, color='grey', linestyle='--', label='α (8-13Hz)',alpha=0.5)
+    plt.axvline(x=30, color='grey', linestyle='--', label='β (13-30Hz)',alpha=0.5)
+    plt.axvline(x=80, color='grey', linestyle='--', label='γ (30-80Hz)',alpha=0.5)
+    plt.legend()
+    plt.show()
+
+
+    ##### Compute the features #####
+    threads_to_use = os.cpu_count()
+    # results_rad = np.asarray(Parallel(n_jobs=threads_to_use)(
+    #     delayed(RAD)(data_w[i]) for i in range(data_w.shape[0])))
+    results = np.asarray(Parallel(n_jobs=threads_to_use)(
+        delayed(compute_features)(data_w[i]) for i in range(data_w.shape[0])))
+    results = (results - results.mean(axis=0, keepdims=True)) / results.std(axis=0, keepdims=True)
+    names = catch22.catch22_all(data_w[0], catch24 = True)['names']
+    print(names)
+    print(results.shape)
+    mpc = build_mpc(results.T)[0]
+    mpc = np.triu(mpc,1)+mpc.T
+    mpc[~np.isfinite(mpc)] = np.finfo(float).eps
+    mpc[mpc==0] = np.finfo(float).eps
+    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
+    gm.fit(mpc, sparsity=0)
+    print(gm.gradients_[:, 0].shape)
+    print(gm.lambdas_) 
+    #feature_index = np.argwhere(np.asarray(catch22.catch22_all(data_w[0], catch24 = True)['names']) == 'FC_LocalSimple_mean3_stderr')[0][0]
+
+    n_plot = 20
+    step = len(gm.gradients_[:, 0]) // n_plot
+    sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
+    sorted_results = results[sorted_gradient_indx]
+    plt.figure(figsize=(8, 10))
+    im = plt.imshow(sorted_results, aspect='auto', cmap='coolwarm', vmin=-3, vmax=3)  # change cmap as needed
+    plt.colorbar(im, label='Feature value')
+    plt.xticks(ticks=np.arange(len(names)), labels=names, rotation=90)
+    plt.tight_layout()
+    plt.show()
+
+    plot_values = np.zeros(vertices_32k_infl.shape[0])
+    plot_values[indices_32k_salience] = gm.gradients_[:, 0]
+    smoothed_values = smooth_euclidean(plot_values, vertices_32k_infl, radius=10.0, sigma=3.0)
+    #smoothed_values = smoothed_values / np.max(smoothed_values)
+    smoothed_values[salience == 0] = np.nan
+    #smoothed_values[salience_border == 1] = np.nan
+    #salience_border = salience_border.astype(float)
+    #salience_border[salience_border == 1] = np.nan
+
+    # Append to surface
+    surf32k_rh_infl.append_array(smoothed_values[32492:], name="overlay1")
+    surf32k_rh_infl.append_array(salience_border[32492:], name="overlay2")
+    surfs = {'rh1': surf32k_rh_infl, 'rh2': surf32k_rh_infl}
+    layout = [['rh1', 'rh2']]
+    view = [['lateral', 'medial']]
+
+    p = plot_surf(surfs, layout=layout, view=view, array_name="overlay1", size=(1200, 600), zoom=1.3, color_bar='bottom', share='both',
+                nan_color=(220, 220, 220, 0), cmap="coolwarm", transparent_bg=True, return_plotter=True)#, color_range='sym')
+    # p = plot_surf(surfs, layout=layout, view=view, array_name="overlay1", size=(1200, 600), zoom=1.3, color_bar='bottom', share='both',
+    #             nan_color=(1, 1, 1, 0), cmap="Purples", color_range=(0,1), transparent_bg=True, return_plotter=True)
+    # p = plot_surf(surfs, layout=layout, view=view, array_name="overlay2", size=(1200, 600), zoom=1.3, color_bar='bottom', share='both',
+    #         nan_color=(0, 0, 0, 1), cmap="Greys", color_range=(0,1), transparent_bg=True, return_plotter=True)
+
+    p.show()
+    # custom_cmap = plt.get_cmap(name="coolwarm")
+    # norm = mp.colors.Normalize(vmin=np.min(gm.gradients_[:, 0]), vmax=np.max(gm.gradients_[:, 0]))  # Normalize integers from 0–4
+    # for i, pos in enumerate(data['ChannelPosition'][:,:]):
+    #     val = gm.gradients_[:, 0]
+    #     rgba = custom_cmap(norm(val[i]))
+    #     rgb = rgba[:3]
+    #     sphere = vtkSphereSource()
+    #     sphere.SetCenter(*pos)
+    #     sphere.SetRadius(1.5)
+    #     sphere.Update()
+    #     actor = p.renderers[0][0].AddActor()
+    #     actor.SetMapper(inputData=sphere.GetOutput())
+    #     actor.GetProperty().SetColor(*rgb)
+    #     actor.GetProperty().SetOpacity(1.0)
+    #     actor.RotateX(-90)
+    #     actor.RotateZ(90)
+
+    # # Add colored spheres
+    # for i, pos in enumerate(data['ChannelPosition'][:,:]):
+    #     val = gm.gradients_[:, 0]
+    #     rgba = custom_cmap(norm(val[i]))
+    #     rgb = rgba[:3]
+    #     sphere = vtkSphereSource()
+    #     sphere.SetCenter(*pos)
+    #     sphere.SetRadius(1.5)
+    #     sphere.Update()
+    #     actor = p.renderers[1][0].AddActor()
+    #     actor.SetMapper(inputData=sphere.GetOutput())
+    #     actor.GetProperty().SetColor(*rgb)
+    #     actor.GetProperty().SetOpacity(1.0)
+    #     actor.RotateX(-90)
+    #     actor.RotateZ(90)
+    #     actor.RotateZ(180)
+
+
+    # Add colored spheres
+    # salience channel index: 89
+    # for i, pos in enumerate(data['ChannelPosition'][:,:]):
+    #     val = channel_integers[i]
+    #     rgba = custom_cmap(norm(val))
+    #     rgb = rgba[:3]
+    #     sphere = vtkSphereSource()
+    #     sphere.SetCenter(*pos)
+    #     sphere.SetRadius(1.5)
+    #     sphere.Update()
+    #     actor = p.renderers[0][0].AddActor()
+    #     actor.SetMapper(inputData=sphere.GetOutput())
+    #     actor.GetProperty().SetColor(*rgb)
+    #     actor.GetProperty().SetOpacity(1.0)
+    #     actor.RotateX(-90)
+    #     actor.RotateZ(90)
+
+    # # Add colored spheres
+    # for i, pos in enumerate(data['ChannelPosition'][:,:]):
+    #     val = channel_integers[i]
+    #     rgba = custom_cmap(norm(val))
+    #     rgb = rgba[:3]
+    #     sphere = vtkSphereSource()
+    #     sphere.SetCenter(*pos)
+    #     sphere.SetRadius(1.5)
+    #     sphere.Update()
+    #     actor = p.renderers[1][0].AddActor()
+    #     actor.SetMapper(inputData=sphere.GetOutput())
+    #     actor.GetProperty().SetColor(*rgb)
+    #     actor.GetProperty().SetOpacity(1.0)
+    #     actor.RotateX(-90)
+    #     actor.RotateZ(90)
+    #     actor.RotateZ(180)
+    # p.show()
+
+
+
+
+    ################### BOLD data ##################
+    # Load data for multiple subjects
+    func_32k = glob.glob('/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC*/ses-a1/func/desc-me_task-rest_bold/surf/sub-PNC*_ses-a1_surf-fsLR-32k_desc-timeseries_clean.shape.gii')
+    # Load the data for each subject
+    func_salience = np.array([nib.load(f).darrays[0].data[:,salience!=0] for f in func_32k])
+    print(func_salience.shape)
+
+    threads_to_use = os.cpu_count()
+    names = catch22.catch22_all(func_salience[0][:,0], catch24 = True, short_names=True)['short_names']
+    print(names)
+    results = Parallel(n_jobs=threads_to_use)(
+        delayed(lambda sub: [
+            compute_features(func_salience[sub][:, i]) for i in range(func_salience[0].shape[1])
+        ])(sub) for sub in range(len(func_salience))
+    )
+
+    results = np.array(results)
+    results = np.array([(results[i,:,:] - results[i,:,:].mean(axis=0, keepdims=True)) / results[i,:,:].std(axis=0, keepdims=True) for i in range(results.shape[0])])
+
+    def preproc_profile(f):
+        mpc = build_mpc(f.T)[0]
+        mpc = np.triu(mpc,1)+mpc.T
+        mpc[~np.isfinite(mpc)] = np.finfo(float).eps
+        mpc[mpc==0] = np.finfo(float).eps
+        return mpc
+    
+    mpc = [preproc_profile(results[i,:,:]) for i in range(results.shape[0])]
+    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle', alignment='procrustes')
+    gm.fit(mpc, sparsity=0)
+    gm.gradients_ = np.mean(np.stack(gm.gradients_), axis=0)
+    print(gm.gradients_[:, 0].shape)
+    #feature_index = np.argwhere(np.asarray(catch22.catch22_all(data_w[0], catch24 = True)['names']) == 'FC_LocalSimple_mean3_stderr')[0][0]
+    print(gm.lambdas_)  
+    n_plot = 20
+    step = len(gm.gradients_[:, 0]) // n_plot
+    sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
+    sorted_results = results.mean(axis=0)[sorted_gradient_indx]
+    plt.figure(figsize=(8, 10))
+    im = plt.imshow(sorted_results, aspect='auto', cmap='coolwarm', vmin=-3, vmax=3)  # change cmap as needed
+    plt.colorbar(im, label='Feature value')
+    plt.xticks(ticks=np.arange(len(names)), labels=names, rotation=90)
+    plt.tight_layout()
+    plt.show()
+
+    plot_values = np.zeros(salience.shape[0])
+    plot_values[salience != 0] = gm.gradients_[:, 0]
+    plot_values[plot_values == 0] = np.nan
+
+    # Append to surface
+    surf32k_rh_infl.append_array(plot_values[32492:], name="overlay1")
+    surf32k_rh_infl.append_array(salience_border[32492:], name="overlay2")
+    surfs = {'rh1': surf32k_rh_infl, 'rh2': surf32k_rh_infl}
+    layout = [['rh1', 'rh2']]
+    view = [['lateral', 'medial']]
+
+    p = plot_surf(surfs, layout=layout, view=view, array_name="overlay1", size=(1200, 600), zoom=1.3, color_bar='bottom', share='both',
+                nan_color=(220, 220, 220, 1), cmap="coolwarm", transparent_bg=True, return_plotter=True)
+    p.show()
+    p = plot_surf(surfs, layout=layout, view=view, array_name="overlay1", size=(1200, 600), zoom=1.3, color_bar='bottom', share='both',
+                nan_color=(220, 220, 220, 0), cmap="coolwarm", transparent_bg=True, return_plotter=True)
+    p.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # output_txt = "/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/electrodes_foci.txt"
+    # with open(output_txt, "w") as f:
+    #     for name, color, coord in zip(channel_name, custom_cmap(norm(channel_integers)) * 255, data['ChannelPosition']):
+    #         f.write(f"{name}\n")
+    #         f.write(f"{color[0]:.0f} {color[1]:.0f} {color[2]:.0f} {coord[0]:.3f} {coord[1]:.3f} {coord[2]:.3f}\n")
     
 
 
@@ -415,22 +841,22 @@ def main():
 
 
 
-    plot_hemispheres(surf_lh, surf_rh, array_name=plot_values, size=(1200, 300), zoom=10, color_bar='bottom', share='both',
-        nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True)
+    # plot_hemispheres(surf_lh, surf_rh, array_name=plot_values, size=(1200, 300), zoom=10, color_bar='bottom', share='both',
+    #     nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True)
 
-    # --- Distance-weighted smoothing ---
-    smoothed_values = np.zeros_like(plot_values)
-    smoothed_values[smoothed_values == 0] = np.nan
-    for vtx_idx, vtx in enumerate(vertices):
-        # Find neighbors within radius
-        neighbor_ids = tree.query_ball_point(vtx, r=5)
-        distances = np.linalg.norm(vertices[neighbor_ids] - vtx, axis=1)
-        weights = np.exp(-distances**2 / (2 * 1**2))
-        values = plot_values[neighbor_ids]
-        smoothed_values[vtx_idx] = np.average(values, weights=weights)
+    # # --- Distance-weighted smoothing ---
+    # smoothed_values = np.zeros_like(plot_values)
+    # smoothed_values[smoothed_values == 0] = np.nan
+    # for vtx_idx, vtx in enumerate(vertices):
+    #     # Find neighbors within radius
+    #     neighbor_ids = tree.query_ball_point(vtx, r=5)
+    #     distances = np.linalg.norm(vertices[neighbor_ids] - vtx, axis=1)
+    #     weights = np.exp(-distances**2 / (2 * 1**2))
+    #     values = plot_values[neighbor_ids]
+    #     smoothed_values[vtx_idx] = np.average(values, weights=weights)
 
-    plot_hemispheres(surf_lh, surf_rh, array_name=smoothed_values, size=(1200, 300), zoom=10, color_bar='bottom', share='both',
-           nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True)
+    # plot_hemispheres(surf_lh, surf_rh, array_name=smoothed_values, size=(1200, 300), zoom=10, color_bar='bottom', share='both',
+    #        nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True)
     
 
 

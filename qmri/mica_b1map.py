@@ -1,5 +1,8 @@
-#!/usr/bin/env python
-#
+from __future__ import division
+
+# !/usr/bin/env python
+# -*- coding: utf-8
+#########################################################################################
 # Compute MT saturation map and T1 map from a PD-weighted, a T1-weighted, and MT-weighted FLASH images
 #
 # Reference paper:
@@ -8,6 +11,13 @@
 #
 # This code is modified to remove dependencies on the Spinal Cord Toolbox (SCT).
 # Original SCT code: https://github.com/neuropoly/spinalcordtoolbox
+#
+# example: 
+# python /local_raid/data/pbautin/software/neuroimaging_scripts/qmri/mica_b1map.py \
+#   -b1_fa /data/mica/mica3/BIDS_PNI/rawdata/sub-PNC026/ses-a2/fmap/sub-PNC026_ses-a2_acq-sfam_TB1TFL.nii.gz \
+#   -b1_ref /data/mica/mica3/BIDS_PNI/rawdata/sub-PNC026/ses-a2/fmap/sub-PNC026_ses-a2_acq-anat_TB1TFL.nii.gz \
+#   -odir /local_raid/data/pbautin/results/qmri
+#########################################################################################
 
 import os
 import shutil
