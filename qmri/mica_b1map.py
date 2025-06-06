@@ -176,7 +176,9 @@ def main():
     # Copy anatomical ref image to outpath to prevent modification of original data
     ref_basename = os.path.basename(b1_tfl_ref).split('.nii')[0]
     ref_fname = os.path.join(output_dir, ref_basename + '_B1ref.nii')
-    shutil.copyfile(b1_tfl_ref, ref_fname)
+    nii_B1map_ref = nib.load(b1_tfl_ref)
+    nii_B1map_ref = nib.Nifti1Image(nii_B1map_ref.get_fdata(), nii_B1map_ref.affine, nii_B1map_ref.header)
+    nib.save(nii_B1map_ref, ref_fname)
     # Try to copy the JSON sidecar file
     try:
         json_source = b1_tfl_ref.split('.nii')[0] + '.json'
