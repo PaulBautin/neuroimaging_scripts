@@ -175,8 +175,8 @@ def main():
     salience = state.copy()
     salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = 0
     salience_border = array_operations.get_labeling_border(surf_32k, salience)
-    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=state, size=(600, 600), zoom=1.3, color_bar='bottom', share='both',
-                nan_color=(220, 220, 220, 1), cmap='CustomCmap_yeo', transparent_bg=True, background=(0,0,0), layout_style='grid')
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=state, size=(600, 600), zoom=1.3, color_bar='bottom', share='both',
+    #             nan_color=(220, 220, 220, 1), cmap='CustomCmap_yeo', transparent_bg=True, background=(0,0,0), layout_style='grid')
     
     #### Load connectivity matrix
     C = glob.glob('/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC*/ses-a1/dwi/connectomes/sub-PNC*_ses-a1_space-dwi_atlas-schaefer-400_desc-iFOD2-40M-SIFT2_full-connectome.shape.gii')
@@ -187,6 +187,81 @@ def main():
     N = C.shape[0] # Number of nodes
     C[np.eye(N, dtype=bool)] = 0
     C = C / np.mean(C[~np.eye(N, dtype=bool)])
+
+    #### tractogram
+    # load the conte69 hemisphere surfaces and spheres
+    from scipy.spatial import KDTree
+    fsLR_lh = nib.load('/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/surf/sub-mni_ses-01_hemi-L_space-nativepro_surf-fsLR-32k_label-white.surf.gii').darrays[0].data
+    fsLR_rh = nib.load('/local_raid/data/pbautin/data/MNI152Volumes/micapipe/micapipe_v0.2.0/sub-mni/ses-01/surf/sub-mni_ses-01_hemi-R_space-nativepro_surf-fsLR-32k_label-white.surf.gii').darrays[0].data
+    coords = np.concatenate([fsLR_lh, fsLR_rh])
+    tree = KDTree(coords)
+    tractogram_f = nib.streamlines.load('/local_raid/data/pbautin/data/dTOR_full_tractogram.trk')
+    tractogram = tractogram_f.streamlines
+    endpoints = [(sl[0], sl[-1]) for sl in tractogram]
+
+    vertex_values = state.copy()
+    vertex_values[salience != 0] = np.nan
+    cutoff = 5.0
+    n_vertices = len(salience)
+    vertex_val = np.zeros(n_vertices)
+
+    streamline_values = []
+    for start_pt, end_pt in endpoints:
+        dist_start, idx_start = tree.query(start_pt)
+        dist_end, idx_end = tree.query(end_pt)
+        start_val = vertex_values[idx_start] if dist_start <= cutoff else np.nan
+        end_val = vertex_values[idx_end] if dist_end <= cutoff else np.nan
+        sl_val = np.nanmax([start_val, end_val])
+        streamline_values.append(sl_val)
+        # Map onto salience vertices if either endpoint maps to them
+        if dist_start <= cutoff and salience[idx_start] != 0 and ~np.isnan(sl_val):
+            vertex_values[idx_start] = sl_val
+        if dist_end <= cutoff and salience[idx_end] != 0 and ~np.isnan(sl_val):
+            vertex_values[idx_end] = sl_val
+    
+    # Normalize: average per vertex
+    vertex_val[vertex_val == 0] = np.nan
+    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=vertex_values, size=(600, 600), zoom=1.3, color_bar='bottom', share='both',
+            nan_color=(220, 220, 220, 1), cmap='CustomCmap_yeo', transparent_bg=True, background=(0,0,0), layout_style='grid')
+
+    streamline_values = np.asarray(streamline_values)
+    streamline_values[np.isnan(streamline_values)] = 0
+    mask = (streamline_values != 0)
+    streamline_arr = (streamline_values - np.min(streamline_values)) / (np.max(streamline_values) - np.min(streamline_values))
+    filtered_tractogram = [tractogram[i] for i in range(len(tractogram)) if mask[i]]
+    filtered_streamline_arr = streamline_arr[mask]
+    new_tractogram = nib.streamlines.Tractogram(filtered_tractogram, affine_to_rasmm=tractogram_f.tractogram.affine_to_rasmm)
+    color = (yeo7_colors(filtered_streamline_arr)[:, 0:3] * 255).astype(np.uint8)
+    tmp = [np.tile(color[i], (len(new_tractogram.streamlines[i]), 1))
+           for i in range(len(new_tractogram.streamlines))]
+    new_tractogram.data_per_point['color'] = tmp
+    trk_file = nib.streamlines.TrkFile(new_tractogram)
+    trk_file.save('/local_raid/data/pbautin/data/output_tractogram_with_dps_3.trk')
+
+
+    # load yeo atlas 7 network
+    atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_lh.label.gii').darrays[0].data + 1000
+    atlas_yeo_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_rh.label.gii').darrays[0].data + 1800
+    atlas_yeo_rh[atlas_yeo_rh == 1800] = 2000
+    yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
+    df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
+
+    # load .csv associated with schaefer 400
+    df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
+    df_label['network'] = df_label['label'].str.extract(r'(Vis|Default|Cont|DorsAttn|Limbic|SalVentAttn|SomMot|medial_wall)')
+    df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
+    state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
+    state[state == np.where(state_name == 'medial_wall')[0]] = np.nan
+    salience = state.copy()
+    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
+    # load connectivty matrix 5k
+    C_5k = glob.glob('/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC*/ses-a1/dwi/connectomes/sub-PNC*_ses-a1_surf-fsLR-5k_desc-iFOD2-40M-SIFT2_full-connectome.shape.gii')
+    C_5k = np.average(np.array([nib.load(f).darrays[0].data for f in C_5k[:2]]), axis=0)
+    C_5k = np.log(np.triu(C_5k,1)+C_5k.T + 1)
+    N = C_5k.shape[0] # Number of nodes
+    C_5k[np.eye(N, dtype=bool)] = 0
+    C_5k = C_5k / np.mean(C_5k[~np.eye(N, dtype=bool)])
+
     
 
     fsl32k_bigbrain_g1_lh = nib.load('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-L_den-32k_desc-Hist_G1.shape.gii').darrays[0].data
