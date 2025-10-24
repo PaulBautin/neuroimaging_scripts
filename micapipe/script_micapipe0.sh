@@ -24,9 +24,9 @@
 # ------------------------------------------------------------------------------
 
 
-export MICAPIPE=/local_raid/data/pbautin/software/micapipe
-PATH=${PATH}:${MICAPIPE}:${MICAPIPE}/functions
-export PATH
+# export MICAPIPE=/local_raid/data/pbautin/software/micapipe
+# PATH=${PATH}:${MICAPIPE}:${MICAPIPE}/functions
+# export PATH
 
 
 #------------------------------------------------------------------------------#

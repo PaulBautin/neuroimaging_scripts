@@ -33,7 +33,7 @@ from brainspace.utils.parcellation import map_to_labels, reduce_by_labels, relab
 from brainspace.datasets import load_gradient, load_marker, load_conte69, load_parcellation
 from brainspace import mesh
 
-from brainspace.null_models import SpinPermutations
+from brainspace.null_models import SpinPermutations, spin_permutations
 from matplotlib import pyplot as plt
 from scipy.stats import spearmanr
 import seaborn as sns
@@ -106,108 +106,44 @@ cmap_types_rgba_mw = np.hstack((cmap_types_rgb_mw, alpha))
 cmap_types_mw = mp.colors.ListedColormap(cmap_types_rgba_mw)
 
 
-def build_mpc(data, parc=None, idxExclude=None):
-    # If no parcellation is provided, MPC will be computed vertexwise
-    if parc is None:
-        downsample = 0
-    else:
-        downsample = 1
+def build_mpc(data):
+    """
+    Compute Microstructural Profile Covariance (MPC) from input data.
 
+    Parameters:
+        data : np.ndarray of shape (features, nodes)
+            Microstructural profiles matrix.
 
-    # Parcellate input data according to parcellation scheme provided by user
-    if downsample == 1:
-        uparcel = np.unique(parc)
-        I = np.zeros([data.shape[0], len(uparcel)])
-
-        # Parcellate data by averaging profiles within nodes
-        for (ii, _) in enumerate(uparcel):
-
-            # Get vertices within parcel
-            thisparcel = uparcel[ii]
-            tmpData = data[:, parc == thisparcel]
-            tmpData[:,np.mean(tmpData) == 0] = 0
-
-            # Define function to find outliers: Return index of values above three scaled median absolute deviations of input data
-            # https://www.mathworks.com/help/matlab/ref/isoutlier.html
-            def find_outliers(data_vector):
-                c = -1 / (np.sqrt(2) * scipy.special.erfcinv(3/2))
-                scaled_MAD = c * np.median(np.abs(data_vector - np.median(data_vector)))
-                is_outlier = np.greater(data_vector, (3 * scaled_MAD) + np.median(data_vector))
-                idx_outlier = [i for i, x in enumerate(is_outlier) if x]
-                return idx_outlier
-
-            # Find if there are any outliers in vertex-wise average profile within given parcel
-            idx = find_outliers(np.mean(tmpData, axis = 0))
-            if len(idx) > 0:
-                tmpData[:,idx] = np.nan
-
-            # Average profiles within parcels
-            I[:,ii] = np.nanmean(tmpData, axis = 1)
-
-        # Get matrix sizes
-        szI = I.shape
-        szZ = [len(uparcel), len(uparcel)]
-
-    else:
-        I = data
-        szI = data.shape
-        szZ = np.empty((data.shape[1], data.shape[1]))
-
-
-    # Build MPC
-    if np.isnan(np.sum(I)):
-
-        # Find where are the NaNs
-        is_nan = np.isnan(I[1,:])
-        problemNodes = [i for i, x in enumerate(is_nan) if x]
-        print("")
-        print("---------------------------------------------------------------------------------")
-        print("There seems to be an issue with the input data or parcellation. MPC will be NaNs!")
-        print("---------------------------------------------------------------------------------")
-        print("")
-
-        # Fill matrices with NaN for return
-        I = np.zeros(szI)
-        I[I == 0] = np.nan
-        MPC = np.zeros(szZ)
-        MPC[MPC == 0] = np.nan
-
-    else:
-        problemNodes = 0
-
-        # Calculate mean across columns, excluding mask and any excluded labels input
-        I_mask = I
-        NoneType = type(None)
-        if type(idxExclude) != NoneType:
-            for i in idxExclude:
-                I_mask[:, i] = np.nan
-        I_M = np.nanmean(I_mask, axis = 1)
-
-        # Get residuals of all columns (controlling for mean)
-        I_resid = np.zeros(I.shape)
-        for c in range(I.shape[1]):
-            y = I[:,c]
-            x = I_M
-            slope, intercept, _, _, _ = scipy.stats.linregress(x,y)
-            y_pred = intercept + slope*x
-            I_resid[:,c] = y - y_pred
-
-        R = np.corrcoef(I_resid, rowvar=False)
-
-        # Log transform
-        MPC = 0.5 * np.log( np.divide(1 + R, 1 - R) )
+    Returns:
+        MPC : np.ndarray of shape (nodes, nodes)
+            Fisher z-transformed correlation matrix of residualized profiles.
+    """
+    X = data.copy()  # (features, nodes)
+    # Compute covariate: mean profile across nodes
+    covar = np.nanmean(X, axis=1, keepdims=True)  # (features, 1)
+    # Z-score each node's profile (column-wise)
+    X_z = (X - np.nanmean(X, axis=0)) / np.nanstd(X, axis=0)
+    X_z = np.nan_to_num(X_z)  # replace potential NaNs
+    # Z-score the covariate
+    covar_z = (covar - np.nanmean(covar)) / np.nanstd(covar)
+    # Design matrix with intercept and covariate
+    intercept = np.ones((covar_z.shape[0], 1))
+    design_matrix = np.hstack((intercept, covar_z))  # shape: (features, 2)
+    # Linear regression via least squares: solve design_matrix @ beta = X_z
+    beta, _, _, _ = np.linalg.lstsq(design_matrix, X_z, rcond=None)  # shape: (2, nodes)
+    X_hat = design_matrix @ beta  # predicted profiles
+    residuals = X_z - X_hat       # residualized profiles
+    # Correlation matrix of residuals
+    R = np.corrcoef(residuals.T)  # shape: (nodes, nodes)
+    # Fisher z-transform
+    with np.errstate(divide='ignore', invalid='ignore'):
+        MPC = 0.5 * np.log((1 + R) / (1 - R))
         MPC[np.isnan(MPC)] = 0
         MPC[np.isinf(MPC)] = 0
-
-        # CLEANUP: correct diagonal and round values to reduce file size
-        # Replace all values in diagonal by zeros to account for floating point error
-        for i in range(0,MPC.shape[0]):
-                MPC[i,i] = 0
-        # Replace lower triangle by zeros
-        MPC = np.triu(MPC)
-
-    # Output MPC, microstructural profiles, and problem nodes
-    return (MPC, I, problemNodes)
+    # Clean up: zero diagonal and enforce symmetry
+    np.fill_diagonal(MPC, 0)
+    MPC = np.triu(MPC, 1) + np.triu(MPC, 1).T
+    return MPC, residuals
 
 
 def convert_states_str2int(states_str):
@@ -500,37 +436,32 @@ def preproc_profile(f):
 
 
 def main():
-    ##### load the conte69 hemisphere surfaces and spheres
+    #### load the conte69 hemisphere surfaces and spheres
     micapipe='/local_raid/data/pbautin/software/micapipe'
-    # Load fsLR-5k inflated surface
-    surf5k_lh = read_surface(micapipe + '/surfaces/fsLR-5k.L.inflated.surf.gii', itype='gii')
-    surf5k_rh = read_surface(micapipe + '/surfaces/fsLR-5k.R.inflated.surf.gii', itype='gii')
     # Load fsLR-32k inflated surface
     surf32k_lh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.L.inflated.surf.gii', itype='gii')
     surf32k_rh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.R.inflated.surf.gii', itype='gii')
-    # Load fsLR-32k midthickness surface
     surf32k_lh = read_surface(micapipe + '/surfaces/fsLR-32k.L.midthickness.surf.gii', itype='gii')
     surf32k_rh = read_surface(micapipe + '/surfaces/fsLR-32k.R.midthickness.surf.gii', itype='gii')
     surf_32k = load_conte69(join=True)
-    # Load fsLR-32k sphere surface
     sphere32k_lh, sphere32k_rh = load_conte69(as_sphere=True)
 
-    ##### load yeo atlas 7 network
-    atlas_yeo_lh = nib.load(micapipe + '/parcellations/schaefer-400_conte69_lh.label.gii').darrays[0].data + 1000
-    atlas_yeo_rh = nib.load(micapipe + '/parcellations/schaefer-400_conte69_rh.label.gii').darrays[0].data + 1800
+    #### load yeo atlas 7 network
+    atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_conte69_lh.label.gii').darrays[0].data + 1000
+    atlas_yeo_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_conte69_rh.label.gii').darrays[0].data + 1800
     atlas_yeo_rh[atlas_yeo_rh == 1800] = 2000
     yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
     df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
-    # load .csv associated with schaefer 400
-    df_label = pd.read_csv(micapipe + '/parcellations/lut/lut_schaefer-400_mics.csv')
+    df_yeo_surf['index'] = df_yeo_surf.index
+    df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
     df_label['network'] = df_label['label'].str.extract(r'(Vis|Default|Cont|DorsAttn|Limbic|SalVentAttn|SomMot|medial_wall)')
     df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
-    state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
-    state[state == np.where(state_name == 'medial_wall')[0]] = np.nan
-    salience = state.copy()
-    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = 0
-    salience_border = array_operations.get_labeling_border(surf_32k, salience)
-    #state[salience_border == 1] = 7
+    df_yeo_surf['network_int'] = convert_states_str2int(df_yeo_surf['network'].values)[0]
+    df_yeo_surf.loc[df_yeo_surf['network'] == 'medial_wall', 'network_int'] = np.nan
+    salience_border = array_operations.get_labeling_border(surf_32k, np.asarray(df_yeo_surf['network'] == 'SalVentAttn'))
+    df_yeo_surf.loc[salience_border == 1, 'network_int'] = 7
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=df_yeo_surf['network_int'].values, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                 nan_color=(220, 220, 220, 1), cmap='CustomCmap_yeo', transparent_bg=True)
 
     ##### Extract the data #####
     data = scipy.io.loadmat("/local_raid/data/pbautin/downloads/MNI_ieeg/MatlabFile.mat") # dict: data.keys()
@@ -572,7 +503,7 @@ def main():
     tree = cKDTree(vertices_32k)
     channel_indices_32k = tree.query(data['ChannelPosition'])[1]
     data['ChannelPosition'] = vertices_32k_infl[channel_indices_32k]
-    indices_in_salience_mask = salience[channel_indices_32k] != 0
+    indices_in_salience_mask = np.asarray(df_yeo_surf['network'] == 'SalVentAttn')[channel_indices_32k] != 0
     indices_32k_salience = channel_indices_32k[indices_in_salience_mask]
     #data['ChannelPosition'] = data['ChannelPosition'][indices_in_salience_mask,:]
 
@@ -585,24 +516,86 @@ def main():
         delayed(compute_features)(data_salience[i]) for i in range(data_salience.shape[0])))
     results = (results - results.mean(axis=0, keepdims=True)) / results.std(axis=0, keepdims=True)
     names = catch22.catch22_all(data_salience[0], catch24 = True)['names']
-    mpc = build_mpc(results.T)[0]
-    mpc = np.triu(mpc,1)+mpc.T
-    mpc[~np.isfinite(mpc)] = np.finfo(float).eps
-    mpc[mpc==0] = np.finfo(float).eps
-    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
-    gm.fit(mpc, sparsity=0)
-    print(gm.lambdas_)
+    mpc_ieeg, residuals_ieeg = build_mpc(results.T)
+    gm_ieeg = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
+    gm_ieeg.fit(mpc_ieeg, sparsity=0)
+    print(gm_ieeg.lambdas_)
 
-    ##### Load the data from the specified text file BigBrain to sort ieeg gradient
-    data_bigbrain = np.loadtxt('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_den-32k_desc-profiles.txt', delimiter=',')
-    salience_bigbrain = data_bigbrain[:,indices_32k_salience]
-    print(salience_bigbrain.shape)
-    mpc_bigbrain = build_mpc(salience_bigbrain)[0]
-    mpc_bigbrain = np.triu(mpc_bigbrain,1)+mpc_bigbrain.T
-    mpc_bigbrain[~np.isfinite(mpc_bigbrain)] = np.finfo(float).eps
-    mpc_bigbrain[mpc_bigbrain==0] = np.finfo(float).eps
-    gm_bigbrain = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
+    plot_values_gradient = np.zeros(vertices_32k_infl.shape[0])
+    plot_values_gradient[indices_32k_salience] = gm_ieeg.gradients_[:, 0]
+    smoothed_values_gradient = smooth_euclidean(plot_values_gradient, vertices_32k_infl, radius=10.0, sigma=3.0)
+    smoothed_values_gradient[np.asarray(df_yeo_surf['network'] == 'SalVentAttn') == 0] = np.nan
+
+    ######### Part 2 -- BigBrain
+    ### Load the data from BigBrain 
+    data_bigbrain = nib.load('/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/sub-BigBrain_surf-fsLR-32k_desc-intensity_profiles.shape.gii').darrays[0].data
+    data_bigbrain_coord_lh = nib.load('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-L_den-32k_desc-mid_coord_bigbrain.func.gii').darrays[1].data
+    data_bigbrain_coord_rh = nib.load('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-L_den-32k_desc-mid_coord_bigbrain.func.gii').darrays[1].data
+    coord_bigbrain_surf = np.concatenate((data_bigbrain_coord_lh, data_bigbrain_coord_rh), axis=0).astype(float)
+    data_bigbrain[:, np.asarray(df_yeo_surf['network'] == 'medial_wall')] = np.nan
+    #y_coords = coord_bigbrain_surf.reshape(-1, 1)
+    #reg = LinearRegression().fit(y_coords[np.asarray(df_yeo_surf['network'] != 'medial_wall')], data_bigbrain.mean(axis=0)[np.asarray(df_yeo_surf['network'] != 'medial_wall')])
+    # regress out y-axis coords if needed
+    #data_bigbrain -= reg.predict(y_coords)
+    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=data_bigbrain.mean(axis=0), size=(1450, 300), zoom=1.3, color_bar='right', share='both',
+                            nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True, screenshot=True, filename='/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/figures/bigbrain_average_surf_wo_y.png')
+    salience_bigbrain = data_bigbrain[:, np.asarray(df_yeo_surf['network'] == 'SalVentAttn')]
+    data_bigbrain[:, np.asarray(df_yeo_surf['network'] != 'SalVentAttn')] =np.nan
+    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=data_bigbrain.mean(axis=0), size=(1450, 300), zoom=1.3, color_bar='right', share='both',
+                            nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True, screenshot=True, filename='/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/figures/bigbrain_salience_average_surf_wo_y.png')
+    mpc_bigbrain, residuals_bigbrain = build_mpc(salience_bigbrain)
+
+    gm_bigbrain = GradientMaps(n_components=3, random_state=12, approach='dm', kernel='normalized_angle')
     gm_bigbrain.fit(mpc_bigbrain, sparsity=0)
+
+    ############## Compare bigbrain and T1 map gradients using Moran Spectral Randomization
+    from brainspace.datasets import load_mask
+    #n_pts = surf_32k.n_points
+    mask_salience = np.asarray(df_yeo_surf['network'] == 'SalVentAttn')
+
+    # Keep only the temporal lobe.
+    g1_bigbrain_salience = gm_bigbrain.gradients_[:, 0]
+    g1_ieeg_salience = smoothed_values_gradient[mask_salience]
+
+    from brainspace.null_models import MoranRandomization
+    from brainspace.mesh import mesh_elements as me
+
+    # compute spatial weight matrix
+    w = me.get_ring_distance(surf_32k, n_ring=1, mask=mask_salience)
+    w.data **= -1
+
+    n_rand = 1000
+    msr = MoranRandomization(n_rep=n_rand, procedure='singleton', tol=1e-6,
+                            random_state=0)
+    msr.fit(w)
+    #curv_rand = msr.randomize(curv_salience)
+    ieeg_rand = msr.randomize(g1_ieeg_salience)
+
+    fig, axs = plt.subplots(1, 2, figsize=(9, 3.5))
+
+    feats = {'ieeg': g1_ieeg_salience, 'curvature': g1_ieeg_salience}
+    rand = {'ieeg': ieeg_rand , 'curvature': ieeg_rand}
+
+    for k, (fn, data) in enumerate(rand.items()):
+        r_obs, pv_obs = spearmanr(feats[fn], g1_bigbrain_salience, nan_policy='omit')
+
+        # Compute perm pval
+        r_rand = np.asarray([spearmanr(g1_bigbrain_salience, d)[0] for d in data])
+        pv_rand = np.mean(np.abs(r_rand) >= np.abs(r_obs))
+
+        # Plot null dist
+        axs[k].hist(r_rand, bins=25, density=True, alpha=0.5, color=(.8, .8, .8))
+        axs[k].axvline(r_obs, lw=2, ls='--', color='k')
+        axs[k].set_xlabel(f'Correlation with {fn}')
+        if k == 0:
+            axs[k].set_ylabel('Density')
+
+        print(f'{fn.capitalize()}:\n r_Obs  : {r_obs:.5e}\n pval_Obs  : {pv_obs:.5e}\n pval_Moran: {pv_rand:.5e}\n')
+
+    fig.tight_layout()
+    plt.show()
+
+    
 
     n_plot = 20
     step = len(gm_bigbrain.gradients_[:, 0]) // n_plot
@@ -618,7 +611,7 @@ def main():
     plot_values_gradient = np.zeros(vertices_32k_infl.shape[0])
     plot_values_gradient[indices_32k_salience] = gm.gradients_[:, 0]
     smoothed_values_gradient = smooth_euclidean(plot_values_gradient, vertices_32k_infl, radius=10.0, sigma=3.0)
-    smoothed_values_gradient[salience == 0] = np.nan
+    smoothed_values_gradient[np.asarray(df_yeo_surf['network'] == 'SalVentAttn') == 0] = np.nan
 
     salience_border = salience_border.astype(float)
 

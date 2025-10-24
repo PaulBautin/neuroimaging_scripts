@@ -8,3 +8,5 @@ functional/kuramoto_f40_K25_MD20ms.npz
 functional/kuramoto_f40_K30_MD20ms.npz
 functional/kuramoto_f40_K35_MD20ms.npz
 functional/kuramoto_f40_K40_MD20ms.npz
+*.nii
+ieeg/*.pkl

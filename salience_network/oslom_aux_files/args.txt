@@ -1,0 +1,1 @@
+/local_raid/data/pbautin/software/OSLOM2/OSLOM2/oslom_undir -f /tmp/tmpmfkt9m53/edges.tsv -w -r 100 -hr 50 -t 0.3

@@ -147,17 +147,17 @@ def convert_states_str2int(states_str):
 
 def main():
     #### load the conte69 hemisphere surfaces and spheres
-    surf_32k = load_conte69(join=True)
-    sphere32k_lh, sphere32k_rh = load_conte69(as_sphere=True)
-    # Load fsLR-5k inflated surface
     micapipe='/local_raid/data/pbautin/software/micapipe'
+    # Load fsLR-5k inflated surface
     surf5k_lh = read_surface(micapipe + '/surfaces/fsLR-5k.L.inflated.surf.gii', itype='gii')
     surf5k_rh = read_surface(micapipe + '/surfaces/fsLR-5k.R.inflated.surf.gii', itype='gii')
-    # Load fsLR-5k inflated surface
+    # Load fsLR-32k inflated surface
     surf32k_lh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.L.inflated.surf.gii', itype='gii')
     surf32k_rh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.R.inflated.surf.gii', itype='gii')
     surf32k_lh = read_surface(micapipe + '/surfaces/fsLR-32k.L.midthickness.surf.gii', itype='gii')
     surf32k_rh = read_surface(micapipe + '/surfaces/fsLR-32k.R.midthickness.surf.gii', itype='gii')
+    surf_32k = load_conte69(join=True)
+    sphere32k_lh, sphere32k_rh = load_conte69(as_sphere=True)
 
 
     #### load yeo atlas 7 network
@@ -318,13 +318,7 @@ def main():
     plt.gca().invert_yaxis()
     plt.tight_layout()
     plt.show()
-    
 
-
-
-    ######### Network control theory ############
-
-    ######### Kuramoto model ############
 
 
 if __name__ == "__main__":

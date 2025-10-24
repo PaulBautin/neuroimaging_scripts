@@ -252,14 +252,15 @@ def main():
     from brainspace.datasets import load_conte69
     # Load the data
     surf_lh, surf_rh = load_conte69()
-    atlas_yeo_lh = nib.load('/home/pabaua/dev_mni/micapipe/parcellations/schaefer-100_conte69_lh.label.gii').darrays[0].data + 1000
-    atlas_yeo_rh = nib.load('/home/pabaua/dev_mni/micapipe/parcellations/schaefer-100_conte69_rh.label.gii').darrays[0].data + 1950
+    micapipe='/local_raid/data/pbautin/software/micapipe'
+    atlas_yeo_lh = nib.load(micapipe + '/parcellations/schaefer-100_conte69_lh.label.gii').darrays[0].data + 1000
+    atlas_yeo_rh = nib.load(micapipe + '/parcellations/schaefer-100_conte69_rh.label.gii').darrays[0].data + 1950
     atlas_yeo_rh[atlas_yeo_rh == 1950] = 2000
     yeo_surf = np.hstack(np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0)).astype(float)
     print(np.unique(yeo_surf))
-    df_func = nib.load('/home/pabaua/Downloads/sub-PNC001_ses-01_03/sub-PNC001/ses-01/func/desc-me_task-rest_bold/surf/sub-PNC001_ses-01_surf-fsLR-32k_desc-timeseries_clean.shape.gii').darrays[0].data
+    df_func = nib.load('/local_raid/data/pbautin/data/PNC_dataset/sub-PNC001/ses-01/func/desc-me_task-rest_bold/surf/sub-PNC001_ses-01_surf-fsLR-32k_desc-timeseries_clean.shape.gii').darrays[0].data
     func_400 = pd.DataFrame(reduce_by_labels(df_func, yeo_surf, red_op='mean', axis=0).T)
-    df_label = pd.read_csv('/home/pabaua/dev_mni/micapipe/parcellations/lut/lut_schaefer-100_mics.csv')
+    df_label = pd.read_csv(micapipe + '/parcellations/lut/lut_schaefer-100_mics.csv')
     df_label = pd.concat([df_label.label, func_400], axis=1)
     df_label = df_label[df_label.label != 'medial_wall'].set_index('label')
     data = binarize(df_label)

@@ -13,11 +13,23 @@ from __future__ import division
 # About the license: see the file LICENSE
 #########################################################################################
 
+# wb_command -surface-coordinates-to-metric /local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-bigbrain/tpl-bigbrain_hemi-R_desc-mid.surf.gii \
+#     /local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-bigbrain/tpl-bigbrain_hemi-R_desc-mid_coord.func.gii
+
+# wb_command -metric-resample /local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-bigbrain/tpl-bigbrain_hemi-R_desc-mid_coord.func.gii \
+#     /local_raid/data/pbautin/software/BigBrainWarp/xfms/tpl-fs_LR_hemi-R_den-164k_desc-sphere_rsled_like_bigbrain.reg.surf.gii \
+#     /local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-R_den-32k_desc-sphere.surf.gii \
+#     BARYCENTRIC \
+#     /local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-R_den-32k_desc-mid_coord_bigbrain.func.gii
+
+
 
 #### imports
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mp
+from matplotlib.colors import Normalize
+from matplotlib.cm import get_cmap
 import os
 from pprint import pprint
 import glob
@@ -40,6 +52,9 @@ import seaborn as sns
 from brainspace.gradient import GradientMaps, kernels
 import scipy
 from joblib import Parallel, delayed
+
+from sklearn.linear_model import LinearRegression
+
 
 
 #### set custom plotting parameters
@@ -129,108 +144,88 @@ def surf_type_isolation(surf_type_test, i):
     return surf_type_copy
 
 
-def build_mpc(data, parc=None, idxExclude=None):
-    # If no parcellation is provided, MPC will be computed vertexwise
-    if parc is None:
-        downsample = 0
-    else:
-        downsample = 1
+# def build_mpc(data):
+#     """
+#     Compute Microstructural Profile Covariance (MPC) from input data.
 
+#     Parameters:
+#         data : np.ndarray
+#             Microstructural profiles (features × nodes).
+#         idxExclude : list[int] or None
+#             Indices of nodes to exclude from the computation.
 
-    # Parcellate input data according to parcellation scheme provided by user
-    if downsample == 1:
-        uparcel = np.unique(parc)
-        I = np.zeros([data.shape[0], len(uparcel)])
+#     Returns:
+#         MPC : np.ndarray
+#             MPC matrix (nodes × nodes).
+#         I : np.ndarray
+#             Cleaned input data matrix used for MPC computation.
+#         problemNodes : list[int] or int
+#             List of problematic nodes (e.g., containing NaNs) or 0 if none.
+#     """
+#     # Compute average microstructural profile (ignoring NaNs) 
+#     I = data.copy()
+#     I_M = np.nanmean(I, axis=1)
 
-        # Parcellate data by averaging profiles within nodes
-        for (ii, _) in enumerate(uparcel):
+#     # Residualize node profiles with respect to the mean profile
+#     I_resid = np.zeros_like(I)
+#     for c in range(I.shape[1]):
+#         y = I[:, c]
+#         x = I_M
+#         slope, intercept, _, _, _ = scipy.stats.linregress(x, y)
+#         I_resid[:, c] = y - (intercept + slope * x)
 
-            # Get vertices within parcel
-            thisparcel = uparcel[ii]
-            tmpData = data[:, parc == thisparcel]
-            tmpData[:,np.mean(tmpData) == 0] = 0
+#     # Compute correlation matrix of residuals
+#     R = np.corrcoef(I_resid, rowvar=False)
 
-            # Define function to find outliers: Return index of values above three scaled median absolute deviations of input data
-            # https://www.mathworks.com/help/matlab/ref/isoutlier.html
-            def find_outliers(data_vector):
-                c = -1 / (np.sqrt(2) * scipy.special.erfcinv(3/2))
-                scaled_MAD = c * np.median(np.abs(data_vector - np.median(data_vector)))
-                is_outlier = np.greater(data_vector, (3 * scaled_MAD) + np.median(data_vector))
-                idx_outlier = [i for i, x in enumerate(is_outlier) if x]
-                return idx_outlier
+#     # Fisher z-transform
+#     with np.errstate(divide='ignore', invalid='ignore'):
+#         MPC = 0.5 * np.log((1 + R) / (1 - R))
+#         MPC[np.isnan(MPC)] = 0
+#         MPC[np.isinf(MPC)] = 0
 
-            # Find if there are any outliers in vertex-wise average profile within given parcel
-            idx = find_outliers(np.mean(tmpData, axis = 0))
-            if len(idx) > 0:
-                tmpData[:,idx] = np.nan
+#     # Zero out diagonal and lower triangle to ensure symmetry and remove redundancy
+#     np.fill_diagonal(MPC, 0)
+#     MPC = np.triu(MPC, 1) + np.triu(MPC, 1).T
+#     return MPC, I, 0
 
-            # Average profiles within parcels
-            I[:,ii] = np.nanmean(tmpData, axis = 1)
+def build_mpc(data):
+    """
+    Compute Microstructural Profile Covariance (MPC) from input data.
 
-        # Get matrix sizes
-        szI = I.shape
-        szZ = [len(uparcel), len(uparcel)]
+    Parameters:
+        data : np.ndarray of shape (features, nodes)
+            Microstructural profiles matrix.
 
-    else:
-        I = data
-        szI = data.shape
-        szZ = np.empty((data.shape[1], data.shape[1]))
-
-
-    # Build MPC
-    if np.isnan(np.sum(I)):
-
-        # Find where are the NaNs
-        is_nan = np.isnan(I[1,:])
-        problemNodes = [i for i, x in enumerate(is_nan) if x]
-        print("")
-        print("---------------------------------------------------------------------------------")
-        print("There seems to be an issue with the input data or parcellation. MPC will be NaNs!")
-        print("---------------------------------------------------------------------------------")
-        print("")
-
-        # Fill matrices with NaN for return
-        I = np.zeros(szI)
-        I[I == 0] = np.nan
-        MPC = np.zeros(szZ)
-        MPC[MPC == 0] = np.nan
-
-    else:
-        problemNodes = 0
-
-        # Calculate mean across columns, excluding mask and any excluded labels input
-        I_mask = I
-        NoneType = type(None)
-        if type(idxExclude) != NoneType:
-            for i in idxExclude:
-                I_mask[:, i] = np.nan
-        I_M = np.nanmean(I_mask, axis = 1)
-
-        # Get residuals of all columns (controlling for mean)
-        I_resid = np.zeros(I.shape)
-        for c in range(I.shape[1]):
-            y = I[:,c]
-            x = I_M
-            slope, intercept, _, _, _ = scipy.stats.linregress(x,y)
-            y_pred = intercept + slope*x
-            I_resid[:,c] = y - y_pred
-
-        R = np.corrcoef(I_resid, rowvar=False)
-
-        # Log transform
-        MPC = 0.5 * np.log( np.divide(1 + R, 1 - R) )
+    Returns:
+        MPC : np.ndarray of shape (nodes, nodes)
+            Fisher z-transformed correlation matrix of residualized profiles.
+    """
+    X = data.copy()  # (features, nodes)
+    # Compute covariate: mean profile across nodes
+    covar = np.nanmean(X, axis=1, keepdims=True)  # (features, 1)
+    # Z-score each node's profile (column-wise)
+    X_z = (X - np.nanmean(X, axis=0)) / np.nanstd(X, axis=0)
+    X_z = np.nan_to_num(X_z)  # replace potential NaNs
+    # Z-score the covariate
+    covar_z = (covar - np.nanmean(covar)) / np.nanstd(covar)
+    # Design matrix with intercept and covariate
+    intercept = np.ones((covar_z.shape[0], 1))
+    design_matrix = np.hstack((intercept, covar_z))  # shape: (features, 2)
+    # Linear regression via least squares: solve design_matrix @ beta = X_z
+    beta, _, _, _ = np.linalg.lstsq(design_matrix, X_z, rcond=None)  # shape: (2, nodes)
+    X_hat = design_matrix @ beta  # predicted profiles
+    residuals = X_z - X_hat       # residualized profiles
+    # Correlation matrix of residuals
+    R = np.corrcoef(residuals.T)  # shape: (nodes, nodes)
+    # Fisher z-transform
+    with np.errstate(divide='ignore', invalid='ignore'):
+        MPC = 0.5 * np.log((1 + R) / (1 - R))
         MPC[np.isnan(MPC)] = 0
         MPC[np.isinf(MPC)] = 0
-
-        # CLEANUP: correct diagonal and round values to reduce file size
-        # Replace all values in diagonal by zeros to account for floating point error
-        for i in range(0,MPC.shape[0]):
-                MPC[i,i] = 0
-        # Replace lower triangle by zeros
-        MPC = np.triu(MPC)
-
-    # Output MPC, microstructural profiles, and problem nodes
-    return (MPC, I, problemNodes)
+    # Clean up: zero diagonal and enforce symmetry
+    np.fill_diagonal(MPC, 0)
+    MPC = np.triu(MPC, 1) + np.triu(MPC, 1).T
+    return MPC, residuals
 
 
 def load_mpc(File):
@@ -244,17 +239,14 @@ def load_mpc(File):
 
 def main():
     #### load the conte69 hemisphere surfaces and spheres
+    micapipe='/local_raid/data/pbautin/software/micapipe'
+    # Load fsLR-32k inflated surface
+    surf32k_lh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.L.inflated.surf.gii', itype='gii')
+    surf32k_rh_infl = read_surface(micapipe + '/surfaces/fsLR-32k.R.inflated.surf.gii', itype='gii')
+    surf32k_lh = read_surface(micapipe + '/surfaces/fsLR-32k.L.midthickness.surf.gii', itype='gii')
+    surf32k_rh = read_surface(micapipe + '/surfaces/fsLR-32k.R.midthickness.surf.gii', itype='gii')
     surf_32k = load_conte69(join=True)
-    sphere_lh, sphere_rh = load_conte69(as_sphere=True)
-    # Load fsLR-5k inflated surface
-    micapipe='/local_raid/data/pbautin/software/micapipe'
-    surf5k_lh = read_surface(micapipe + '/surfaces/fsLR-5k.L.inflated.surf.gii', itype='gii')
-    surf5k_rh = read_surface(micapipe + '/surfaces/fsLR-5k.R.inflated.surf.gii', itype='gii')
-    # Load fsLR-5k inflated surface
-    micapipe='/local_raid/data/pbautin/software/micapipe'
-    surf32k_lh = read_surface(micapipe + '/surfaces/fsLR-32k.L.inflated.surf.gii', itype='gii')
-    surf32k_rh = read_surface(micapipe + '/surfaces/fsLR-32k.R.inflated.surf.gii', itype='gii')
-
+    sphere32k_lh, sphere32k_rh = load_conte69(as_sphere=True)
 
     #### load yeo atlas 7 network
     atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_conte69_lh.label.gii').darrays[0].data + 1000
@@ -262,18 +254,16 @@ def main():
     atlas_yeo_rh[atlas_yeo_rh == 1800] = 2000
     yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
     df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
-    # load .csv associated with schaefer 400
+    df_yeo_surf['index'] = df_yeo_surf.index
     df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
     df_label['network'] = df_label['label'].str.extract(r'(Vis|Default|Cont|DorsAttn|Limbic|SalVentAttn|SomMot|medial_wall)')
     df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
-    state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
-    state[state == np.where(state_name == 'medial_wall')[0]] = np.nan
-    salience = state.copy()
-    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = 0
-    salience_border = array_operations.get_labeling_border(surf_32k, salience)
-    state[salience_border == 1] = 7
-    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=state, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                    nan_color=(220, 220, 220, 1), cmap='CustomCmap_yeo', transparent_bg=True)
+    df_yeo_surf['network_int'] = convert_states_str2int(df_yeo_surf['network'].values)[0]
+    df_yeo_surf.loc[df_yeo_surf['network'] == 'medial_wall', 'network_int'] = np.nan
+    salience_border = array_operations.get_labeling_border(surf_32k, np.asarray(df_yeo_surf['network'] == 'SalVentAttn'))
+    df_yeo_surf.loc[salience_border == 1, 'network_int'] = 7
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=df_yeo_surf['network_int'].values, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                 nan_color=(220, 220, 220, 1), cmap='CustomCmap_yeo', transparent_bg=True)
 
     #### load econo atlas
     econo_surf_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/economo_conte69_lh.label.gii').darrays[0].data
@@ -284,12 +274,361 @@ def main():
     econ_ctb = econ_ctb[[0] + list(range(2, 45))]
     surf_type = relabel(econo_surf, econ_ctb)
     surf_type[surf_type == 0] = np.nan
-    #surf_type[salience_border == 1] = 7
-    print(np.unique(surf_type))
-    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=surf_type, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                nan_color=(220, 220, 220, 1), cmap='CustomCmap_type', transparent_bg=True)
-    surf_type_lh = surf_type[:32492]
-    surf_type_rh = surf_type[32492:]
+    df_yeo_surf['surf_type'] = surf_type
+    print(df_yeo_surf)
+    # surf_type[salience_border == 1] = 7
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=surf_type, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #             nan_color=(220, 220, 220, 1), cmap='CustomCmap_type', transparent_bg=True)
+
+    
+    ###### Cortical type comparisons
+    # Define type labels
+    type_labels = ['Kon', 'Eu-III', 'Eu-II', 'Eu-I', 'Dys', 'Ag', 'Other']
+    label_map = dict(zip(range(1, 8), type_labels))
+
+    # Prepare spin permutations
+    n_rand = 100
+    sp = SpinPermutations(n_rep=n_rand, random_state=0)
+    sp.fit(sphere32k_lh, points_rh=sphere32k_rh)
+
+    # Compute and store results
+    all_data = {}
+    real_data = {}
+
+    surf_type[np.isnan(surf_type)] = 7  # Replace NaNs with dummy label
+    state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
+    state[np.isnan(state)] = np.where(state_name == 'medial_wall')[0][0]  # Replace NaNs with dummy label
+
+    for net_idx, net_name in enumerate(state_name):
+        mask = (state == net_idx)
+        mask_lh, mask_rh = mask[:32492], mask[32492:]
+
+        # Empirical
+        expected_types = np.arange(1, 8)  # Cortical types 1 to 7
+        comp = surf_type[mask] * mask[mask]
+        observed_types, counts = np.unique(comp, return_counts=True)
+        counts_dict = dict(zip(observed_types, counts))
+        full_counts = np.array([counts_dict.get(t, 0) for t in expected_types])
+        percentages = (full_counts / len(comp)) * 100
+        real_data[net_name] = dict(zip(expected_types, percentages))
+
+        # comp = surf_type[mask] * mask[mask]
+        # u, c = np.unique(comp, return_counts=True)
+        # perc = (c / len(comp)) * 100
+        # real_data[net_name] = dict(zip(u, perc))
+
+        # Null distribution
+        net_rot = np.hstack(sp.randomize(mask_lh, mask_rh))
+        comp_dict = {val: [] for val in np.unique(surf_type)}
+        for n in range(n_rand):
+            comp = surf_type[net_rot[n]] * net_rot[n][net_rot[n]]
+            u, c = np.unique(comp, return_counts=True)
+            counts_dict = dict(zip(u, c))
+            full_counts = np.array([counts_dict.get(t, 0) for t in expected_types])
+            perc = (full_counts / len(comp)) * 100
+            for val in comp_dict:
+                comp_dict[val].append(dict(zip(expected_types, perc)).get(val, 0))
+        df = pd.DataFrame(comp_dict)
+        df.rename(columns={k: label_map.get(k, k) for k in df.columns}, inplace=True)
+        all_data[net_name] = df
+    print(all_data)
+
+    from scipy.stats import ks_2samp
+    from sklearn.decomposition import PCA
+
+    # Convert real_data (dict of percentages) to a DataFrame
+    del real_data['medial_wall']
+    networks = list(real_data.keys())
+    cortical_types = np.arange(1, 8)
+
+    # Create DataFrame with rows = networks, columns = cortical types
+    real_df = pd.DataFrame.from_dict(real_data, orient='index')
+    real_df.columns = [label_map[t] for t in cortical_types]
+
+    # Compute pairwise KS test statistics
+    n_nets = len(networks)
+    ks_matrix = np.zeros((n_nets, n_nets))
+
+    for i in range(n_nets):
+        for j in range(n_nets):
+            ks_stat, _ = ks_2samp(real_df.iloc[i], real_df.iloc[j])
+            ks_matrix[i, j] = ks_stat
+
+    # Project to first principal component for row/column ordering
+    pca = PCA(n_components=1)
+    pc_order = np.argsort(pca.fit_transform(real_df).ravel())
+    ordered_labels = [networks[i] for i in pc_order]
+
+    # Reorder KS matrix
+    ks_matrix_ordered = ks_matrix[pc_order, :][:, pc_order]
+
+    # Plotting
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(ks_matrix_ordered, xticklabels=ordered_labels, yticklabels=ordered_labels,
+                cmap='magma', square=True, cbar_kws={'label': 'KS Statistic'})
+    plt.title('Pairwise KS Test: Cortical Type Distributions Across Networks')
+    plt.tight_layout()
+    plt.show()
+
+
+    ######### Part 1 -- T1 map
+    ### Load the data from PNI dataset
+    t1_files = sorted(glob.glob('/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC*/ses-a1/mpc/acq-T1map/sub-PNC*_ses-a1_surf-fsLR-32k_desc-intensity_profiles.shape.gii'))
+    t1_salience_profile = [nib.load(f).darrays[0].data[:, np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] for f in t1_files]
+    t1_salience_mpc = [build_mpc(f)[0] for f in t1_salience_profile]
+    t1_salience_residuals = [build_mpc(f)[1] for f in t1_salience_profile]
+    gm_t1 = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle', alignment='procrustes')
+    gm_t1.fit(t1_salience_mpc, sparsity=0)
+    t1_gradients = np.mean(np.asarray(gm_t1.gradients_), axis=0)
+
+    arr = np.full(64984, np.nan)
+    arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = t1_gradients[:, 0]
+    df_yeo_surf['t1_gradient1_salience'] = arr
+    #df_yeo_salience = df_yeo_surf[df_yeo_surf['network'] == 'SalVentAttn']
+    #index_type = np.argsort(df_yeo_salience['surf_type'].values)
+
+    # from scipy.ndimage import rotate
+    # surf_type_sorted = df_yeo_salience['surf_type'].values[index_type]
+    # mpc_fig = t1_salience_mpc[0][index_type[:, np.newaxis], index_type].copy()
+    # mpc_fig[np.tri(mpc_fig.shape[0], mpc_fig.shape[0]) == 1] = np.nan
+    # mpc_fig= rotate(mpc_fig, angle=-45, order=0, cval=np.nan)
+    # fig, ax = plt.subplots(figsize=(8, 8))
+    # im = ax.imshow(mpc_fig, cmap='coolwarm', vmin=-2,vmax=2, origin='upper')
+    # # Add colorbar
+    # #cbar = plt.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, label='MPC (z-value)')
+    # # Aesthetic adjustments
+
+    # # Add surf_type labels along diagonal
+    # n = len(surf_type_sorted)
+    # mid = mpc_fig.shape[0] // 2
+    # offset = np.linspace(0, mpc_fig.shape[0]-1, n).astype(int)
+
+    # for i, label in enumerate(surf_type_sorted):
+    #     ax.text(offset[i], offset[i], str(label), rotation=45,
+    #             ha='center', va='center', fontsize=6, color='black')
+    # plt.axis('off')
+    # plt.title('Upper Triangle of MPC Rotated by 45°')
+    # plt.tight_layout()
+    # plt.show()
+   
+    # Plot
+    n_plot = 30
+    step = len(t1_gradients[:, 0]) // n_plot
+    sorted_gradient_indx = np.argsort(t1_gradients[:, 0])[::step]
+    sorted_gradient = t1_gradients[:, 0][sorted_gradient_indx]
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import get_cmap
+    norm = Normalize(vmin=np.min(t1_gradients[:, 0]), vmax=np.max(t1_gradients[:, 0]))
+    cmap = get_cmap('coolwarm')
+    colors = [cmap(norm(g)) for g in sorted_gradient]
+    plt.figure(figsize=(6, 10))
+    for idx, color in zip(sorted_gradient_indx, colors):
+        plt.plot(t1_salience_residuals[0][:, idx] / 1000, np.arange(t1_salience_residuals[0].shape[0]), color=color, alpha=0.8, lw=3)
+    plt.xlabel("Cortical Depth (0 = WM, 1 = Pial)")
+    plt.ylabel("T1 Map Intensity")
+    plt.title("Cortical Depth Profiles Colored by Gradient (Pial on Top)")
+    plt.gca().invert_yaxis()  # pial at top
+    plt.grid(False)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    plt.tight_layout()
+    plt.show()
+    
+    arr = np.full(64984, np.nan)
+    arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = t1_gradients[:, 0]
+    df_yeo_surf['t1_gradient1_salience'] = arr
+
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                          nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                         nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+
+    
+    ######### Part 2 -- BigBrain
+    ### Load the data from BigBrain 
+    data_bigbrain = nib.load('/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/sub-BigBrain_surf-fsLR-32k_desc-intensity_profiles.shape.gii').darrays[0].data
+    data_bigbrain_coord_lh = nib.load('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-L_den-32k_desc-mid_coord_bigbrain.func.gii').darrays[1].data
+    data_bigbrain_coord_rh = nib.load('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_hemi-L_den-32k_desc-mid_coord_bigbrain.func.gii').darrays[1].data
+    coord_bigbrain_surf = np.concatenate((data_bigbrain_coord_lh, data_bigbrain_coord_rh), axis=0).astype(float)
+    data_bigbrain[:, np.asarray(df_yeo_surf['network'] == 'medial_wall')] = np.nan
+    y_coords = coord_bigbrain_surf.reshape(-1, 1)
+    reg = LinearRegression().fit(y_coords[np.asarray(df_yeo_surf['network'] != 'medial_wall')], data_bigbrain.mean(axis=0)[np.asarray(df_yeo_surf['network'] != 'medial_wall')])
+    # regress out y-axis coords if needed
+    #data_bigbrain -= reg.predict(y_coords)
+    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=data_bigbrain.mean(axis=0), size=(1450, 300), zoom=1.3, color_bar='right', share='both',
+                            nan_color=(220, 220, 220, 1), cmap='Purples', transparent_bg=True, screenshot=True, filename='/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/figures/bigbrain_average_surf_wo_y.png')
+    salience_bigbrain = data_bigbrain[:, np.asarray(df_yeo_surf['network'] == 'SalVentAttn')]
+    data_bigbrain[:, np.asarray(df_yeo_surf['network'] != 'SalVentAttn')] =np.nan
+    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=data_bigbrain.mean(axis=0), size=(1450, 300), zoom=1.3, color_bar='right', share='both',
+                            nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True, screenshot=True, filename='/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/figures/bigbrain_salience_average_surf_wo_y.png')
+    mpc_bigbrain, residuals_bigbrain = build_mpc(salience_bigbrain)
+
+    # from scipy.ndimage import rotate
+    # mpc_fig = mpc.copy()
+    # mpc_fig[np.tri(mpc_fig.shape[0], mpc_fig.shape[0]) == 1] = np.nan
+    # mpc_fig= rotate(mpc_fig, angle=-45, order=0, cval=np.nan)
+    # plt.imshow(mpc_fig, cmap='coolwarm', vmin=-2,vmax=2, origin='upper')
+    # # Add colorbar
+    # #cbar = plt.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, label='MPC (z-value)')
+    # # Aesthetic adjustments
+    # plt.axis('off')
+    # plt.title('Upper Triangle of MPC Rotated by 45°')
+    # plt.tight_layout()
+    # plt.show()
+
+    gm_bigbrain = GradientMaps(n_components=3, random_state=12, approach='dm', kernel='normalized_angle')
+    gm_bigbrain.fit(mpc_bigbrain, sparsity=0)
+    # Plot
+    n_plot = 30
+    step = len(gm_bigbrain.gradients_[:, 0]) // n_plot
+    sorted_gradient_indx = np.argsort(gm_bigbrain.gradients_[:, 0])[::step]
+    sorted_gradient = gm_bigbrain.gradients_[:, 0][sorted_gradient_indx]
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import get_cmap
+    # Normalize gradient values for colormap mapping
+    norm = Normalize(vmin=np.min(gm_bigbrain.gradients_[:, 0]), vmax=np.max(gm_bigbrain.gradients_[:, 0]))
+    cmap = get_cmap('coolwarm')
+    colors = [cmap(norm(g)) for g in sorted_gradient]
+    plt.figure(figsize=(6, 10))
+    for idx, color in zip(sorted_gradient_indx, colors):
+        plt.plot(residuals_bigbrain[:, idx], np.arange(residuals_bigbrain.shape[0]), color=color, alpha=0.8, lw=3)
+
+    plt.ylabel("Cortical Depth (0 = WM, 1 = Pial)")
+    plt.xlabel("Profile residuals (average profile regressed out)")
+    plt.title("Cortical Depth Profiles")
+    plt.gca().invert_yaxis()  # pial at top
+    plt.grid(False)
+
+    # Colorbar for gradient values
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    plt.tight_layout()
+    plt.show()
+
+    print(gm_bigbrain.lambdas_)
+    arr = np.full(64984, np.nan)
+    #arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
+    arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = gm_bigbrain.gradients_[:, 0]
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=arr, size=(1450, 300), zoom=1.3, color_bar='right', share='both',
+    #                         nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True, screenshot=True, filename='/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/figures/bigbrain_salience_gradient1_wo_y.png')
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                         nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+    # # second gradient
+    # arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = gm_bigbrain.gradients_[:, 1]
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                          nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
+    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+    #                         nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+    
+
+    ############## Compare bigbrain and T1 map gradients using Moran Spectral Randomization
+    from brainspace.datasets import load_mask
+    #n_pts = surf_32k.n_points
+    mask_salience = np.asarray(df_yeo_surf['network'] == 'SalVentAttn')
+
+    # Keep only the temporal lobe.
+    g1_bigbrain_salience = gm_bigbrain.gradients_[:, 0]
+    g1_t1_salience = t1_gradients[:, 0]
+    curv_salience = load_marker('curvature', join=True)[mask_salience]
+
+
+    from brainspace.null_models import MoranRandomization
+    from brainspace.mesh import mesh_elements as me
+
+    # compute spatial weight matrix
+    w = me.get_ring_distance(surf_32k, n_ring=1, mask=mask_salience)
+    w.data **= -1
+
+    n_rand = 1000
+    msr = MoranRandomization(n_rep=n_rand, procedure='singleton', tol=1e-6,
+                            random_state=0)
+    msr.fit(w)
+    curv_rand = msr.randomize(curv_salience)
+    print(curv_rand)
+    t1_rand = msr.randomize(g1_t1_salience)
+    print(t1_rand)
+
+    fig, axs = plt.subplots(1, 2, figsize=(9, 3.5))
+
+    feats = {'t1': g1_t1_salience, 'curvature': g1_t1_salience}
+    rand = {'t1': t1_rand, 'curvature': t1_rand}
+
+    for k, (fn, data) in enumerate(rand.items()):
+        r_obs, pv_obs = spearmanr(feats[fn], g1_bigbrain_salience, nan_policy='omit')
+
+        # Compute perm pval
+        r_rand = np.asarray([spearmanr(g1_bigbrain_salience, d)[0] for d in data])
+        pv_rand = np.mean(np.abs(r_rand) >= np.abs(r_obs))
+
+        # Plot null dist
+        axs[k].hist(r_rand, bins=25, density=True, alpha=0.5, color=(.8, .8, .8))
+        axs[k].axvline(r_obs, lw=2, ls='--', color='k')
+        axs[k].set_xlabel(f'Correlation with {fn}')
+        if k == 0:
+            axs[k].set_ylabel('Density')
+
+        print(f'{fn.capitalize()}:\n r_Obs  : {r_obs:.5e}\n pval_Obs  : {pv_obs:.5e}\n pval_Moran: {pv_rand:.5e}\n')
+
+    fig.tight_layout()
+    plt.show()
+    
+
+
+    ######### Part 1
+    ### Load the data from the specified text file AHEAD
+    data_ahead_parva = nib.load('/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/sub-Ahead-Parvalbumin_surf-fsLR-32k_desc-intensity_profiles.shape.gii').darrays[0].data
+    salience_ahead_parva = data_ahead_parva[:, np.asarray(df_yeo_surf['network'] == 'SalVentAttn')]
+    mpc = build_mpc(salience_ahead_parva)[0]
+    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
+    gm.fit(mpc, sparsity=0)
+
+    n_plot = 50
+    step = len(gm.gradients_[:, 0]) // n_plot
+    sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
+    sorted_gradient = gm.gradients_[:, 0][sorted_gradient_indx]
+
+
+    # Plot
+    from matplotlib.colors import Normalize
+    from matplotlib.cm import get_cmap
+    # Normalize gradient values for colormap mapping
+    norm = Normalize(vmin=np.min(gm.gradients_[:, 0]), vmax=np.max(gm.gradients_[:, 0]))
+    cmap = get_cmap('coolwarm')
+    colors = [cmap(norm(g)) for g in sorted_gradient]
+    plt.figure(figsize=(6, 10))
+    for idx, color in zip(sorted_gradient_indx, colors):
+        plt.plot(salience_ahead_parva[:, idx] / 10000, np.arange(salience_ahead_parva.shape[0]), color=color, alpha=0.8, lw=3)
+
+    plt.xlabel("Cortical Depth (0 = WM, 1 = Pial)")
+    plt.ylabel("T1 Map Intensity")
+    plt.title("Cortical Depth Profiles Colored by Gradient (Pial on Top)")
+    plt.gca().invert_yaxis()  # pial at top
+    plt.grid(False)
+
+    # Colorbar for gradient values
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    plt.tight_layout()
+    plt.show()
+
+    print(gm.lambdas_)
+    arr = np.zeros(64984)
+    arr[arr == 0] = np.nan
+    arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+    # second gradient
+    arr[np.asarray(df_yeo_surf['network'] == 'SalVentAttn')] = (gm.gradients_[:, 1] - np.min(gm.gradients_[:, 1])) / (np.max(gm.gradients_[:, 1]) - np.min(gm.gradients_[:, 1]))
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
+    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
+                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
+
+
 
     #### tractogram
     # load the conte69 hemisphere surfaces and spheres
@@ -353,7 +692,7 @@ def main():
     # Prepare spin permutations
     n_rand = 100
     sp = SpinPermutations(n_rep=n_rand, random_state=0)
-    sp.fit(sphere_lh, points_rh=sphere_rh)
+    sp.fit(sphere32k_lh, points_rh=sphere32k_rh)
 
     # Compute and store results
     all_data = {}
@@ -432,145 +771,6 @@ def main():
 
     plt.tight_layout()
     plt.show()
-
-
-    ######### Part 2
-    ### Load the data from the specified text file BigBrain
-    data_bigbrain = np.loadtxt('/local_raid/data/pbautin/software/BigBrainWarp/spaces/tpl-fs_LR/tpl-fs_LR_den-32k_desc-profiles.txt', delimiter=',')
-    salience = state.copy()
-    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
-    salience_bigbrain = data_bigbrain[:,~np.isnan(salience)]
-    mpc = build_mpc(salience_bigbrain)[0]
-    mpc = np.triu(mpc,1)+mpc.T
-    mpc[~np.isfinite(mpc)] = np.finfo(float).eps
-    mpc[mpc==0] = np.finfo(float).eps
-    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle')
-    gm.fit(mpc, sparsity=0)
-
-    n_plot = 30
-    step = len(gm.gradients_[:, 0]) // n_plot
-    sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
-    sorted_gradient = gm.gradients_[:, 0][sorted_gradient_indx]
-
-
-    # Plot
-    from matplotlib.colors import Normalize
-    from matplotlib.cm import get_cmap
-    # Normalize gradient values for colormap mapping
-    norm = Normalize(vmin=np.min(gm.gradients_[:, 0]), vmax=np.max(gm.gradients_[:, 0]))
-    cmap = get_cmap('coolwarm')
-    colors = [cmap(norm(g)) for g in sorted_gradient]
-    plt.figure(figsize=(6, 10))
-    for idx, color in zip(sorted_gradient_indx, colors):
-        plt.plot(salience_bigbrain[:, idx] / 10000, np.arange(salience_bigbrain.shape[0]), color=color, alpha=0.8, lw=3)
-
-    plt.xlabel("Cortical Depth (0 = WM, 1 = Pial)")
-    plt.ylabel("T1 Map Intensity")
-    plt.title("Cortical Depth Profiles Colored by Gradient (Pial on Top)")
-    plt.gca().invert_yaxis()  # pial at top
-    plt.grid(False)
-
-    # Colorbar for gradient values
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-
-    plt.tight_layout()
-    plt.show()
-
-    print(gm.lambdas_)
-    arr = np.zeros(64984)
-    arr[arr == 0] = np.nan
-    arr[~np.isnan(salience)] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
-    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
-    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
-
-    arr[~np.isnan(salience)] = (gm.gradients_[:, 1] - np.min(gm.gradients_[:, 1])) / (np.max(gm.gradients_[:, 1]) - np.min(gm.gradients_[:, 1]))
-    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
-    plot_hemispheres(surf32k_lh, surf32k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
-    
-    #### Load the data from the specified text file T1 map
-    #### 7T network gradient
-    # load yeo atlas 7 network
-    atlas_yeo_lh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_lh.label.gii').darrays[0].data + 1000
-    atlas_yeo_rh = nib.load('/local_raid/data/pbautin/software/micapipe/parcellations/schaefer-400_fslr-5k_rh.label.gii').darrays[0].data + 1800
-    atlas_yeo_rh[atlas_yeo_rh == 1800] = 2000
-    yeo_surf = np.concatenate((atlas_yeo_lh, atlas_yeo_rh), axis=0).astype(float)
-    df_yeo_surf = pd.DataFrame(data={'mics': yeo_surf})
-
-    # load .csv associated with schaefer 400
-    df_label = pd.read_csv('/local_raid/data/pbautin/software/micapipe/parcellations/lut/lut_schaefer-400_mics.csv')
-    df_label['network'] = df_label['label'].str.extract(r'(Vis|Default|Cont|DorsAttn|Limbic|SalVentAttn|SomMot|medial_wall)')
-    df_yeo_surf = df_yeo_surf.merge(df_label, on='mics', validate="many_to_one", how='left')
-    state, state_name = convert_states_str2int(df_yeo_surf['network'].values)
-    state[state == np.where(state_name == 'medial_wall')[0]] = np.nan
-    salience = state.copy()
-    salience[salience != np.where(state_name == 'SalVentAttn')[0][0]] = np.nan
-
-    def preproc_profile(f):
-        mpc = build_mpc(nib.load(f).darrays[0].data[:, ~np.isnan(salience)])[0]
-        mpc = np.triu(mpc,1)+mpc.T
-        mpc[~np.isfinite(mpc)] = np.finfo(float).eps
-        mpc[mpc==0] = np.finfo(float).eps
-        return mpc
-
-    t1_files = sorted(glob.glob('/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC*/ses-a1/mpc/acq-T1map/sub-PNC*_ses-a1_surf-fsLR-5k_desc-intensity_profiles.shape.gii'))
-    t1_salience_profile = np.array([nib.load(f).darrays[0].data[:, ~np.isnan(salience)] for f in t1_files])
-    t1_salience_profile_avg = np.mean(t1_salience_profile, axis=0)
-    t1_salience_mpc = [preproc_profile(f) for f in t1_files]
-    gm = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle', alignment='procrustes')
-    gm.fit(t1_salience_mpc, sparsity=0)
-    gm.gradients_ = np.mean(np.stack(gm.gradients_), axis=0)
-    print(gm.lambdas_)
-   
-
-    n_plot = 30
-    step = len(gm.gradients_[:, 0]) // n_plot
-    sorted_gradient_indx = np.argsort(gm.gradients_[:, 0])[::step]
-    sorted_gradient = gm.gradients_[:, 0][sorted_gradient_indx]
-
-
-    # Plot
-    from matplotlib.colors import Normalize
-    from matplotlib.cm import get_cmap
-    # Normalize gradient values for colormap mapping
-    norm = Normalize(vmin=np.min(gm.gradients_[:, 0]), vmax=np.max(gm.gradients_[:, 0]))
-    cmap = get_cmap('coolwarm')
-    colors = [cmap(norm(g)) for g in sorted_gradient]
-    plt.figure(figsize=(6, 10))
-    for idx, color in zip(sorted_gradient_indx, colors):
-        plt.plot(t1_salience_profile_avg[:, idx] / 1000, np.arange(t1_salience_profile_avg.shape[0]), color=color, alpha=0.8, lw=3)
-
-    plt.xlabel("Cortical Depth (0 = WM, 1 = Pial)")
-    plt.ylabel("T1 Map Intensity")
-    plt.title("Cortical Depth Profiles Colored by Gradient (Pial on Top)")
-    plt.gca().invert_yaxis()  # pial at top
-    plt.grid(False)
-
-    # Colorbar for gradient values
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
-
-    plt.tight_layout()
-    plt.show()
-    
-
-    arr = np.zeros(9684)
-    arr[arr == 0] = np.nan
-    arr[~np.isnan(salience)] = (gm.gradients_[:, 0] - np.min(gm.gradients_[:, 0])) / (np.max(gm.gradients_[:, 0]) - np.min(gm.gradients_[:, 0]))
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
-
-    arr[~np.isnan(salience)] = (gm.gradients_[:, 1] - np.min(gm.gradients_[:, 1])) / (np.max(gm.gradients_[:, 1]) - np.min(gm.gradients_[:, 1]))
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                             nan_color=(220, 220, 220, 1), cmap='coolwarm', transparent_bg=True)
-    plot_hemispheres(surf5k_lh, surf5k_rh, array_name=arr, size=(1200, 300), zoom=1.3, color_bar='bottom', share='both',
-                            nan_color=(220, 220, 220, 0), cmap='coolwarm', transparent_bg=True)
 
 
 
