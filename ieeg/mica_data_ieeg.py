@@ -27,7 +27,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
-import pycatch22 as catch22
+# import pycatch22 as catch22
 from joblib import Parallel, delayed
 import os
 from brainspace import mesh
@@ -449,6 +449,8 @@ def main():
         df_channel.to_pickle(channel_path)
         print(f"Saved df_ieeg to {channel_path}")
         print(df_channel)
+
+
     df_channel = df_channel.drop(columns='ChannelName').groupby(['Subject', 'Session']).first()
     lh = np.stack(df_channel['ChannelMap_lh'].array).astype(float)  # shape: (N, 32492)
     rh = np.stack(df_channel['ChannelMap_rh'].array).astype(float)  # shape: (N, 32492)
@@ -463,7 +465,7 @@ def main():
                         nan_color=(220, 220, 220, 1),
                         cmap="inferno", transparent_bg=True)
     
-            # --- Setup surface and plot layout ---)
+    # --- Setup surface and plot layout ---)
     surfs = {'lh1': surf32k_lh_infl, 'lh2': surf32k_lh_infl, 'rh1': surf32k_rh_infl, 'rh2': surf32k_rh_infl}
     layout = [['lh1', 'lh2', 'rh1', 'rh2']]
     view = [['lateral', 'medial', 'lateral', 'medial']]

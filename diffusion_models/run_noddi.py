@@ -2,27 +2,21 @@
 # -*- coding: utf-8 -*-
 
 # ------------------------------------------------------------------------------
-# Script to Run COMMIT on Diffusion MRI Data
+# Script to Run NODDI on Diffusion MRI Data
 # ------------------------------------------------------------------------------
 #
 # Feature justification
-# Structural connectomes reconstructed from dMRI have poor accuracy and can be improved
-# with filtering methods.
 #
 # References:
-# - Original Paper: https://doi.org/10.1126%2Fsciadv.aba8245
-# - GitHub Repository: https://github.com/daducci/COMMIT
+# - Original Paper: 
+# - GitHub Repository: 
 #
 # Before Running:
-# - Ensure MATLAB version 2017b or newer is installed with the Image Processing
-#   Toolbox and Signal Processing Toolbox.
-# - Clone the NORDIC GitHub repository.
 #
 # Input Data:
 # - MICA-PNC Pilot014 preprocessed dMRI images
 #
 # Previous Implementation:
-# - The tractogram data was previously filtered with SIFT
 #
 # ------------------------------------------------------------------------------
 

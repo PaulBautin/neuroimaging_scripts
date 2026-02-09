@@ -44,6 +44,42 @@ threads=30
 # --data_is_shelled --slm=linear --repol --niter=8 --fwhm=10,8,4,2,0,0,0,0 --repol --mporder=6 --s2v_niter=5 --s2v_lambda=1 --s2v_interp=trilinear \
 # --slspec=slspec.txt --out=dwi_post_eddy --verbose --estimate_move_by_susceptibility
 
+# singularity exec --nv --env FREESURFER_HOME=/opt/freesurfer-7.4.1/freesurfer --writable-tmpfs --containall --cleanenv \
+#     -B "${bids}:/bids" \
+#     -B "${out}:/out" \
+#     -B "${tmpDir}:/tmp" \
+#     -B "${fs_lic}:/opt/license.txt" \
+#     -B /local_raid/data/pbautin/software/micapipe:/opt/micapipe \
+#     "${img_singularity}" \
+#     bash -c "source /opt/freesurfer-7.4.1/freesurfer/SetUpFreeSurfer.sh && \
+#              /opt/micapipe/micapipe \
+#              -bids /bids \
+#              -out /out \
+#              -fs_licence /opt/license.txt \
+#              -threads ${threads} \
+#              -sub ${sub} \
+#              -ses ${ses} \
+#              -post_structural \
+#              -atlas schaefer-400 \
+#              -nocleanup"
+
+# singularity exec --nv --env FREESURFER_HOME=/opt/freesurfer-7.4.1/freesurfer --writable-tmpfs --containall --cleanenv \
+#     -B "${bids}:/bids" \
+#     -B "${out}:/out" \
+#     -B "${tmpDir}:/tmp" \
+#     -B "${fs_lic}:/opt/license.txt" \
+#     -B /local_raid/data/pbautin/software/micapipe:/opt/micapipe \
+#     "${img_singularity}" \
+#     bash -c "source /opt/freesurfer-7.4.1/freesurfer/SetUpFreeSurfer.sh && \
+#              micapipe_cleanup \
+#              -bids /bids \
+#              -out /out \
+#              -fs_licence /opt/license.txt \
+#              -threads ${threads} \
+#              -sub ${sub} \
+#              -ses ${ses} \
+#              -proc_dwi \
+
 singularity exec --nv --env FREESURFER_HOME=/opt/freesurfer-7.4.1/freesurfer --writable-tmpfs --containall --cleanenv \
     -B "${bids}:/bids" \
     -B "${out}:/out" \

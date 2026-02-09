@@ -60,6 +60,9 @@ from sklearn.linear_model import LinearRegression
 from functools import partial
 from matplotlib.cm import get_cmap
 
+from effconnpy import CausalityAnalyzer,create_connectivity_matrix
+numpy._import_array
+
 
 
 
@@ -272,38 +275,7 @@ def main():
     # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=df_yeo_surf['network_int'].values, size=(1450, 300), zoom=1.3, color_bar='right', share='both',
     #         nan_color=(0, 0, 0, 1), cmap='CustomCmap_yeo', transparent_bg=True)
 
-    #### load econo atlas Hardcoded based on table data in Garcia-Cabezas (2021)
-    econo_surf_lh = nib.load(micapipe + '/parcellations/economo_conte69_lh.label.gii').darrays[0].data
-    econo_surf_rh = nib.load(micapipe + '/parcellations/economo_conte69_rh.label.gii').darrays[0].data
-    econo_surf = np.concatenate((econo_surf_lh, econo_surf_rh), axis=0).astype(float)
-    econ_ctb = np.array([0, 0, 2, 3, 4, 3, 3, 3, 2, 2, 3, 3, 3, 4, 5, 6, 6, 6, 5, 4, 6, 6, 4, 4, 6, 6, 6, 2, 1, 1, 2, 1, 2, 3, 2, 3, 4, 3, 3, 2, 1, 1, 2, 4, 5])[[0] + list(range(2, 45))]
-    df_yeo_surf['surf_type'] = relabel(econo_surf, econ_ctb).astype(float)
-    # plt_values = df_yeo_surf['surf_type'].values * df_yeo_surf['salience_border'].values
-    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=plt_values, size=(1450, 300), zoom=1.3, color_bar='right', share='both',
-    #             nan_color=(0, 0, 0, 1), cmap='CustomCmap_type', transparent_bg=True, interactive=False)
     
-    #### Baillarger type
-    baillarger_surf_lh = nib.load('/local_raid/data/pbautin/downloads/MYATLAS_package/MYATLAS_package_new/maps/Surface/HCP_conte69/conte69_32k/gii/parcellation/Baillarger_type_parcellation_from_colin27_to_conte69_32k_lh.label.gii').darrays[0].data
-    baillarger_surf_rh = nib.load('/local_raid/data/pbautin/downloads/MYATLAS_package/MYATLAS_package_new/maps/Surface/HCP_conte69/conte69_32k/gii/parcellation/Baillarger_type_parcellation_from_colin27_to_conte69_32k_rh.label.gii').darrays[0].data
-    baillarger_surf = np.concatenate((baillarger_surf_lh, baillarger_surf_rh), axis=0).astype(float)
-    baillarger_surf[(baillarger_surf == 0) | (baillarger_surf == 1)] = 1
-    # print(np.unique(baillarger_surf))
-    # print(np.array(sns.color_palette('Set2', 5)) * 255)
-    #baillarger_surf = baillarger_surf * df_yeo_surf['salience_border'].values
-    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=baillarger_surf, size=(1450, 300), zoom=1.3, color_bar='right', share='both',
-    #         nan_color=(0, 0, 0, 1), cmap='CustomCmap_baillarger', transparent_bg=True)
-
-    #### Intrusion type
-    intrusion_surf_lh = nib.load('/local_raid/data/pbautin/downloads/MYATLAS_package/MYATLAS_package_new/maps/Surface/HCP_conte69/conte69_32k/gii/parcellation/Intrusion_type_parcellation_from_colin27_to_conte69_32k_lh.label.gii').darrays[0].data
-    intrusion_surf_rh = nib.load('/local_raid/data/pbautin/downloads/MYATLAS_package/MYATLAS_package_new/maps/Surface/HCP_conte69/conte69_32k/gii/parcellation/Intrusion_type_parcellation_from_colin27_to_conte69_32k_rh.label.gii').darrays[0].data
-    intrusion_surf = np.concatenate((intrusion_surf_lh, intrusion_surf_rh), axis=0).astype(float)
-    intrusion_surf[(intrusion_surf == 0) | (intrusion_surf == 1)] = 1
-    # print(np.unique(intrusion_surf))
-    # print(np.array(sns.color_palette('Set2', 5)) * 255)
-    #intrusion_surf = intrusion_surf * df_yeo_surf['salience_border'].values
-    # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=intrusion_surf, size=(1450, 300), zoom=1.3, color_bar='right', share='both',
-    #         nan_color=(0, 0, 0, 1), cmap='CustomCmap_intrusion', transparent_bg=True)
-
 
     ##########################################################################
     ####################### ANALYSIS #########################################
@@ -347,7 +319,7 @@ def main():
 
 
     func_files = glob.glob('/data/mica/mica3/BIDS_PNI/derivatives/micapipe_v0.2.0/sub-PNC*/ses-a1/func/desc-me_task-rest_bold/surf/sub-PNC*_ses-a1_surf-fsLR-32k_desc-timeseries_clean.shape.gii')
-    func = np.stack([zscore(nib.load(f).darrays[0].data, axis=0) for f in func_files[:] if nib.load(f).darrays[0].data.shape[0] == 275])
+    func = np.stack([zscore(nib.load(f).darrays[0].data, axis=0) for f in func_files[:2] if nib.load(f).darrays[0].data.shape[0] == 275])
     print(func.shape)
     func_bottom = zscore(func[:, :, df_yeo_surf['quantile_idx'].eq(-1)].mean(axis=2), axis=1)
     func_top = zscore(func[:, :, df_yeo_surf['quantile_idx'].eq(1)].mean(axis=2), axis=1)
@@ -355,6 +327,11 @@ def main():
     corr_bottom = np.stack([np.arctanh(np.dot(func_bottom[i], func[i]) / (len(func_bottom[i]) - 1)) for i in range(func_sal.shape[0])])
     corr_top = np.stack([np.arctanh(np.dot(func_top[i], func[i]) / (len(func_bottom[i]) - 1)) for i in range(func_sal.shape[0])])
     corr = zscore(np.mean(np.abs(corr_top), axis=0) - np.mean(np.abs(corr_bottom), axis=0))
+
+    func_network = [zscore(func[:, :, df_yeo_surf['network'].eq(network)].mean(axis=2), axis=1) for network in df_yeo_surf['network'].unique()]
+    print(func_network.shape)
+
+
 
     # plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, array_name=np.abs(corr_bottom[1]), size=(1450, 300), zoom=1.3, color_bar='right', share='both',
     #     nan_color=(220, 220, 220, 1), cmap='Blues', transparent_bg=True, color_range=(0,0.5))
@@ -365,7 +342,7 @@ def main():
 
 
 
-    func = np.vstack([zscore(nib.load(f).darrays[0].data, axis=0) for f in func_files[:] if nib.load(f).darrays[0].data.shape[0] == 275])
+    func = np.vstack([zscore(nib.load(f).darrays[0].data, axis=0) for f in func_files[:2] if nib.load(f).darrays[0].data.shape[0] == 275])
     func_bottom = zscore(func[:, df_yeo_surf['quantile_idx'].eq(-1)].mean(axis=1), axis=0)
     func_top = zscore(func[:, df_yeo_surf['quantile_idx'].eq(1)].mean(axis=1), axis=0)
     func_sal = zscore(func[:, df_yeo_surf['network'].eq('SalVentAttn')].mean(axis=1), axis=0)
