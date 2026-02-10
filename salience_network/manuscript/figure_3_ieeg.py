@@ -60,7 +60,6 @@ from scipy.signal import butter, filtfilt, resample_poly, welch
 
 from figure_2_distance import load_bigbrain_gradients
 
-
 #### set custom plotting parameters
 params = {'font.size': 14}
 plt.rcParams.update(params)
@@ -391,7 +390,7 @@ def frequency_analysis(data, indices_32k, values):
     norm = mp.colors.Normalize(vmin=-1, vmax=1)
     fig, ax = plt.subplots(figsize=(6, 4))
     for i in range(pxx.shape[0]): 
-        plt.loglog(freq, pxx[i, :], color=custom_cmap(norm(values[i])))
+        plt.loglog(freq, pxx[i, :], color=custom_cmap(norm(values[i])), rasterized=True, alpha=0.7)
     plt.xlabel('Frequency (Hz)')
     plt.ylabel('Normalized PSD')
     plt.title('Power Spectral Density')
@@ -401,7 +400,7 @@ def frequency_analysis(data, indices_32k, values):
     ax.set_xticklabels(xtick_labels)
     for x in xticks:
         ax.axvline(x=x, color="grey", linestyle="--", alpha=0.4)
-    plt.savefig("/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/figures/figure3_ieeg_mni_atlas.svg")
+    plt.savefig("/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/figures/figure3_ieeg_mni_atlas.svg", format='svg', bbox_inches='tight')
 
 
 def smooth_lapy(surf_map, surf, sigma=10.0, lambda_=0.1, fix_zeros=True):
@@ -712,7 +711,7 @@ def main():
 
     print(df_ieeg[df_ieeg.network == 'SalVentAttn'].index)
     frequency_analysis(data, df_ieeg[df_ieeg.network == 'SalVentAttn'].index, df_ieeg[df_ieeg.network == 'SalVentAttn'].mpc_g1.values)
-    frequency_band_analysis(data, surf32k_lh_infl, surf32k_rh_infl, df_yeo_surf.network.values, df_yeo_surf.network.unique(), df_ieeg.indices_32k, df_yeo_surf)
+    #frequency_band_analysis(data, surf32k_lh_infl, surf32k_rh_infl, df_yeo_surf.network.values, df_yeo_surf.network.unique(), df_ieeg.indices_32k, df_yeo_surf)
 
     # plot_values_gradient = np.zeros(vertices_32k_infl.shape[0])
     # plot_values_gradient[channel_indices_32k] = 1
@@ -786,7 +785,7 @@ def main():
     A_psd = np.nan_to_num(np.arctanh(A_psd), nan=0.0, posinf=0.0, neginf=0.0)  # Fisher transform
     print(A_psd.shape)
 
-    plot_A_psd(df_yeo_surf, channel_indices_32k, A_psd)
+    #plot_A_psd(df_yeo_surf, channel_indices_32k, A_psd)
     
 
     A_bottom = np.mean(A_psd[df_yeo_surf.quantile_idx.values[channel_indices_32k] == -1, :], axis=0)
@@ -820,7 +819,7 @@ def main():
     axes[1].yaxis.tick_right()
     plt.tight_layout()
     plt.savefig("/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/figures/figure3_ieeg_mni_atlas_correlation.svg")
-    plt.show()
+    #plt.show()
 
     ##### Plotting #####
     salience_border = df_yeo_surf['salience_border'].values.astype(float)
@@ -864,7 +863,8 @@ def main():
         actor.RotateX(-90)
         actor.RotateZ(90)
         actor.RotateZ(180)
-    p.show()
+    screenshot_path = f"/local_raid/data/pbautin/software/neuroimaging_scripts/salience_network/manuscript/figures/figure3_ieeg_salience_corr_diff_mni_atlas.svg"
+    p.screenshot(screenshot_path, transparent_bg=True)
 
     
 
