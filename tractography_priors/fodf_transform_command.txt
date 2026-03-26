@@ -1,0 +1,9 @@
+warpinit /local_raid/data/pbautin/data/bradypho/input_data/sub-HC062_ses-01_space-mni_fod_wm.nii.gz /local_raid/data/pbautin/data/bradypho/input_data/identity_warp[].nii
+
+for i in {0..2}; do
+    antsApplyTransforms -d 3 -e 0 -i /local_raid/data/pbautin/data/bradypho/input_data/identity_warp${i}.nii -o /local_raid/data/pbautin/data/bradypho/input_data/mrtrix_warp${i}.nii -r /local_raid/data/pbautin/data/bradypho bdp_registration_utils/sub-04/sub-04_epo-00_ref-ACPC_brain_t1.nii.gz  -t /local_raid/data/pbautin/data/bradypho/bdp_registration_utils/sub-04/to_specimen1Warp.nii.gz  -t /local_raid/data/pbautin/data/bradypho/bdp_registration_utils/sub-04/to_specimen0GenericAffine.mat  --default-value 2147483647
+done
+
+warpcorrect /local_raid/data/pbautin/data/bradypho/input_data/mrtrix_warp[].nii /local_raid/data/pbautin/data/bradypho/input_data/mrtrix_warp_corrected.mif -marker 2147483647
+
+mrtransform /local_raid/data/pbautin/data/bradypho/input_data/sub-HC062_ses-01_space-mni_fod_wm.nii.gz  -warp /local_raid/data/pbautin/data/bradypho/input_data/mrtrix_warp_corrected.mif  /local_raid/data/pbautin/data/bradypho/input_data/warped_input_image.mif -reorient_fod yes

@@ -4,11 +4,14 @@ from brainspace.datasets import load_conte69
 from brainspace.plotting import plot_hemispheres
 from brainspace.mesh.mesh_io import read_surface
 from brainspace.mesh import mesh_elements, mesh_operations
+from brainspace.utils.parcellation import reduce_by_labels, map_to_labels
 from lapy import TriaMesh, Solver
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, eigsh, splu
 import pandas as pd
 from scipy.stats import zscore
+import matplotlib.pyplot as plt
+from brainspace.gradient.gradient import GradientMaps
 
 
 def model_balloon_fourier(mode_coeff, dt):
@@ -103,19 +106,18 @@ def solve_laplace_beltrami(surface, curvature_param=10):
     surface (tuple): A tuple containing vertices and faces of the cortical surface.
     curvature_param (int): Parameter for curvature computation. Default is 10.
 
-    Parameters:
-    surface (tuple): A tuple containing vertices and faces of the cortical surface.
-
     Returns:
-    eigvals (ndarray): Eigenvalues of the Laplace-Beltrami operator.
-    eigvecs (ndarray): Eigenvectors of the Laplace-Beltrami operator.
+    eigvals   (ndarray): Eigenvalues of the Laplace-Beltrami operator.
+    eigvecs   (ndarray): Eigenvectors of the Laplace-Beltrami operator.
+    stiffness (ndarray): Stiffness matrix of FEM model.
+    mass      (ndarray): Mass matrix of FEM model.
     """
     tm = TriaMesh(v=mesh_elements.get_points(surface), t=mesh_elements.get_cells(surface))
     u1, u2, _, _ = tm.curvature_tria(curvature_param)
     hetero_tri = tm.map_vfunc_to_tfunc(np.ones(mesh_elements.get_points(surface).shape[0]))
     hetero_mat = np.tile(hetero_tri[:, np.newaxis], (1, 2))
     stiffness, mass = Solver._fem_tria_aniso(tm, u1, u2, hetero_mat)
-    print(mass)
+
      # Solve the eigenvalue problem
     sigma = -0.01
     lu = splu(stiffness - sigma * mass)
@@ -124,23 +126,39 @@ def solve_laplace_beltrami(surface, curvature_param=10):
     return np.asarray(eigvals), np.asarray(eigvecs), stiffness, mass
 
 
-def generate_synthetic_fmri(eigvals, eigvecs, mass, time_points=200, dt=0.1):
-    # Simulate neural activity or BOLD signals on the surface mesh using the eigenmode decomposition. 
-    # The simulation uses a Neural Field Theory wave model and optionally the Balloon-Windkessel model for BOLD signal generation.
-    # generate external input array of shape (n_verts, n_timepoints)
+def generate_synthetic_fmri(eigvals, eigvecs, mass, time_points=200, dt=0.1, model_bold=False):
+    """
+    Simulate neural activity or BOLD signals on the surface mesh using Neural Field Theory.
+    
+    Parameters:
+    eigvals (ndarray): Eigenvalues of the Laplace-Beltrami operator.
+    eigvecs (ndarray): Eigenvectors of the Laplace-Beltrami operator.
+    mass (ndarray): Mass matrix of the FEM model.
+    time_points (int): Number of time points to simulate. Default is 200.
+    dt (float): Time step size for the simulation. Default is 0.1 seconds.
+    model_bold (bool): If True, apply the Balloon-Windkessel model to convert neural activity to BOLD signal. Default is False.
+
+    Returns:
+    sim_activity (ndarray): Simulated activity on the surface mesh over time, shape (n_verts, time_points).
+    """
     n_verts, n_modes = eigvecs.shape
     external_input = np.random.randn(n_verts, time_points)
+
     # do a mode decomposition of the external input
     input_coeffs = eigvecs.T @ mass @ external_input
-    print(input_coeffs.shape)
+
     # Initialize simulated activity vector
     mode_coeffs = np.zeros((n_modes, time_points))
     for mode_ind in range(n_modes):
         input_coeffs_i = input_coeffs[mode_ind, :]
         eval = eigvals[mode_ind]
         neural = model_wave_fourier(input_coeffs_i, dt=dt, r=28.9, gamma=0.116, eval=eval)
-        bold = model_balloon_fourier(neural, dt)
-        mode_coeffs[mode_ind, :] = bold
+        if model_bold:
+            bold = model_balloon_fourier(neural, dt)
+            mode_coeffs[mode_ind, :] = bold
+        else:
+            mode_coeffs[mode_ind, :] = neural
+            
     # Combine the mode activities to get the total simulated activity
     sim_activity = zscore(eigvecs @ mode_coeffs, axis=1)
     return sim_activity
@@ -156,15 +174,36 @@ def main():
     surfs = mesh_operations.mask_points(surfs, np.array(~df_yeo_surf.hemisphere.isna()))
     
     eigvals, eigvecs, stiffness, mass = solve_laplace_beltrami(surfs, curvature_param=10)
-    sim_fmri = generate_synthetic_fmri(eigvals, eigvecs, mass)[:, 50:]
+    sim_fmri = generate_synthetic_fmri(eigvals, eigvecs, mass, time_points=750)[:, 50:]
     # create a matrix of nan the size of the full surface and fill in the simulated data
     full_n_verts = df_yeo_surf.hemisphere.values.shape[0]
     sim_fmri_full = np.full((full_n_verts, sim_fmri.shape[1]), np.nan)
     sim_fmri_full[~df_yeo_surf.hemisphere.isna(), :] = sim_fmri
+    print(sim_fmri_full.shape)
+    # Correlation matrix of the simulated data
+    sim_fmri_parcel = reduce_by_labels(sim_fmri_full, df_yeo_surf.mics.values, axis=1)
+    corr = np.corrcoef(sim_fmri_parcel)
+    print(corr.shape)
+    plt.imshow(corr, cmap='coolwarm', vmin=-1, vmax=1)
+    plt.show()
+
+    # Compute gradient using brainspace
+    valid = ~np.all(np.isnan(corr), axis=1)
+    print(valid.shape)
+    corr_z = corr[np.ix_(valid, valid)]
+    corr_z = np.arctanh(corr_z)
+    corr_z = np.nan_to_num(corr_z, nan=0.0, posinf=0.0, neginf=0.0)
+    gm_t1 = GradientMaps(n_components=3, random_state=None, approach='dm', kernel='normalized_angle', alignment='procrustes')
+    gm_t1.fit(corr_z, sparsity=0)
+
+    parcel_grad = np.full((corr.shape[0],3), np.nan)
+    parcel_grad[valid,:] = gm_t1.gradients_[:, :]
+    plot_val = map_to_labels(parcel_grad.T, df_yeo_surf.mics.values)
+    plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, plot_val, cmap='coolwarm', color_bar=True, color_range='sym')
+
 
     print(sim_fmri.shape)
     # plot sim_fmri with brainspace
-
     plot_hemispheres(surf32k_lh_infl, surf32k_rh_infl, sim_fmri_full[:, ::15].T, cmap='coolwarm', color_bar=True, color_range=(-3,3))
 
 
