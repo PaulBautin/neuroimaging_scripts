@@ -114,10 +114,35 @@ bids='/local_raid/data/pbautin/data/pilot_dataset/rawdata'
 out='/local_raid/data/pbautin/data/pilot_dataset/derivatives'
 fs_lic='/data_/mica1/01_programs/freesurfer-7.3.2/license.txt'
 tmpDir='/local_raid/data/pbautin/data/pilot_dataset/tmp'
-sub='sub-PNC032'
-ses='ses-a1'
+sub='sub-PX005'
+ses='ses-01'
 threads=30
 
+# micapipe_cleanup -sub $sub -ses $ses -out $out -bids $bids -post_structural
+
+# #structural processing
+# micapipe \
+#     -bids $bids \
+#     -out $out \
+#     -fs_licence $fs_lic \
+#     -sub $sub \
+#     -ses $ses \
+#     -post_structural \
+#     -threads $threads \
+#     -tmpDir $tmpDir -atlas schaefer-400
+
+# # DWI processing
+# micapipe \
+#      -bids $bids \
+#      -out $out \
+#      -fs_licence $fs_lic \
+#      -sub $sub \
+#      -ses $ses \
+#      -proc_dwi \
+#      -b0thr 61 \
+#      -dwi_main ${bids}/${sub}/${ses}/dwi/${sub}_${ses}_acq-multib38_dir-AP_dwi.nii.gz,${bids}/${sub}/${ses}/dwi/${sub}_${ses}_acq-multib70_dir-AP_dwi.nii.gz \
+#      -dwi_rpe ${bids}/${sub}/${ses}/dwi/${sub}_${ses}_acq-b0_dir-PA_dwi.nii.gz \
+#      -tmpDir $tmpDir -threads 30 \
 
 # SC test
 micapipe \
@@ -126,4 +151,6 @@ micapipe \
     -fs_licence $fs_lic \
     -sub $sub \
     -ses $ses \
-    -SC -nocleanup -tracts 5M
+    -SC -nocleanup -tracts 1M \
+    -threads $threads \
+    -tmpDir $tmpDir
